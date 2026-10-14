@@ -1,35 +1,60 @@
 # Wiring
 
-## 1. Pin map (Arduino UNO R3)
+## 1. Pin map (Arduino Mega 2560)
 
-| UNO pin | Connected to | Type | Notes |
+| Mega pin | Connected to | Type | Notes |
 |---|---|---|---|
-| **A4 / SDA, A5 / SCL** | RGB LCD shield (0x20) + RTC (0x68) | I²C | provided by the stacked shields |
+| **D20 / SDA, D21 / SCL** (also the SDA/SCL header next to AREF) | RGB LCD shield (0x20) + RTC (0x68) | I²C | provided by the stacked shields (see §1.1) |
 | **D2** | DHT22 / AM2302 **DATA** | digital in/out | pull-up to 5 V is built into the AM2302. For a bare DHT22, add 10 kΩ (4.7 kΩ for cables > 3 m) |
 | **D3** | **DC/DC SSR input (+)** → supply of the 4 mist-head drivers | digital out | timed bursts, 4 s window, ≥ 0.3 s. SSR input draws ~7–12 mA, which D3 can supply |
 | **D5** | **heater SSR** → silicone heater pad on the finned heat sink inside the chamber (DC/DC SSR for a 24 VDC pad, SSR-25DA for 230 VAC) | digital out | time-proportioned, 2 s window |
 | **D6** | MOSFET / SSR-DD → **fresh-air blower** | digital out | time-proportioned, 10 s window |
 | **D7** | DC/DC SSR or MOSFET → **heater / circulation fan (IP68)** | digital out | **on whenever RUNning**, so the heater always has air flow |
-| **D8** | active buzzer **or** LED of a lighted push button (5 V) | digital out | blinks on alarm; max 20 mA directly |
-| D10–D13 | microSD (CS, MOSI, MISO, SCK) | SPI | on the Data Logging Shield |
+| **D8** | **active buzzer 5 V** (+) | digital out | beeps for alarms not yet acknowledged. Drive it directly only if it draws ≤ 20 mA; otherwise (or for a loud 12 V buzzer) use a transistor or MOSFET module |
+| **D22** | **green LED** "RUN / IN TOLERANCE" | digital out | steady = stable in tolerance, 1 Hz blink = settling, off = stopped |
+| **D24** | **red LED** "ALARM" | digital out | fast blink = new alarm, steady = acknowledged, off = no alarm |
+| **D26** | **amber LED** "HEATER" | digital out | lit while the heater output is on |
+| **D28** | **blue LED** "MIST" | digital out | lit while the mist heads are on |
+| D10 | microSD CS | SPI | SD data on D50 (MISO), D51 (MOSI), D52 (SCK) via the ICSP header (see §1.1) |
 | VIN | +12 V | power | |
-| GND | common ground | | shared with the 12 V and 5 V supplies and all MOSFET modules |
-| *free* | D4, D9, A0–A3 | | removed: level switch, door switch, DS18B20 |
+| GND | common ground | | shared with the 12 V supply and all MOSFET modules (SSR inputs are isolated) |
+| *free* | D4, D9, D11–D13, D23, D25, D27, D29–D49, A0–A15 | | float switch and door switch not fitted |
+
+### 1.1 Using UNO-size shields on the Mega
+
+* **Adafruit RGB LCD Shield:** use the R3 version, which takes I²C from the SDA/SCL pins next to AREF; on a Mega these are D20/D21. Older shields that only use A4/A5 need two jumper wires: A4 → D20 and A5 → D21.
+* **Data Logging Shield:** the **Adafruit rev B** reads the SD card through the **ICSP header**, so it works on the Mega unchanged (CS stays D10). Many cheap clones use D11–D13 for SPI, and those **do not work on a Mega** without jumper wires (D11 → D51, D12 → D50, D13 → D52). Alternatively, use a separate microSD module on D50–D53.
+* Stack order: Mega → Data Logging Shield → RGB LCD Shield. Wire the extra pins (D22–D28, D8 and the SSR signals) from the logging shield's proto area or directly from the Mega's headers.
+
+### 1.2 Status LEDs and buzzer
+
+```
+ D22 ──[330 Ω]──►|── GND    green  RUN / IN TOLERANCE
+ D24 ──[330 Ω]──►|── GND    red    ALARM
+ D26 ──[330 Ω]──►|── GND    amber  HEATER
+ D28 ──[330 Ω]──►|── GND    blue   MIST
+ D8  ──────────► buzzer (+) ; buzzer (−) ── GND      (5 V active buzzer)
+```
+
+* Use 330 Ω–1 kΩ resistors (~5–10 mA), or 5 V panel-mount LEDs that already contain a resistor. **12/24 V pilot lamps** cannot be driven directly from the pins; switch them through a transistor/MOSFET module.
+* Lighted push buttons can still be used as indicators: connect their LED like the LEDs above.
+* At power-on all four LEDs light briefly and the buzzer gives one short beep (lamp test).
 
 ## 2. Signal wiring
 
 ```
-                    Arduino UNO R3 (+ logging shield + LCD shield)
+                    Arduino Mega 2560 (+ logging shield + LCD shield)
                 ┌──────────────────────────────────────┐
  AM2302   VCC ──┤ 5V                                   │
          DATA ──┤ D2                                   │
           GND ──┤ GND                                  │
                 │ D3 ───────► (3)+  DC/DC SSR (mist)   │   SSR (4)− ── GND
-                │ D5 ───────► DC+ (3) SSR-25DA (heater)│   SSR DC− (4) ── GND
+                │ D5 ───────► (3)+  heater SSR         │   SSR (4)− ── GND
                 │ D6 ───────► SIG   MOSFET (fresh-air) │
-                │ D7 ───────► SIG   MOSFET (circ. fan) │
+                │ D7 ───────► SIG   MOSFET (heater fan)│
                 │ GND ──────► GND of all MOSFET modules│
-                │ D8 ───────► Buzzer+ / button LED+    │   Buzzer− / LED− ── GND
+                │ D8 ───────► Buzzer +                 │   Buzzer − ── GND
+                │ D22/24/26/28 ─[330 Ω]─► LEDs         │   LED cathodes ── GND
                 └──────────────────────────────────────┘
 ```
 
@@ -91,7 +116,8 @@
        └────────────────────────────────────────────────────────────────────────┘    to water trap
          20 mm insulation outside (recommended)
 
-   IP65 control box (outside): UNO + shields, SSRs, MOSFETs, PSUs, heater/fan connectors
+   IP65 control box (outside): Mega + shields, SSRs, MOSFETs, PSUs, heater/fan connectors;
+   status LEDs and buzzer on the box front panel
 ```
 
 ## 5. DHT22 placement

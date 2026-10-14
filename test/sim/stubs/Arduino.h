@@ -12,6 +12,7 @@
 #include <strings.h>
 using std::isnan;
 
+#define HOST_SIM 1
 #define HIGH 1
 #define LOW 0
 #define OUTPUT 1

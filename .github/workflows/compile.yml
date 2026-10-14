@@ -5,13 +5,13 @@ on:
   pull_request:
 
 jobs:
-  arduino-uno:
+  arduino-mega:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/compile-sketches@v1
         with:
-          fqbn: arduino:avr:uno
+          fqbn: arduino:avr:mega
           sketch-paths: |
             - firmware/SCC_EnvControl
           libraries: |

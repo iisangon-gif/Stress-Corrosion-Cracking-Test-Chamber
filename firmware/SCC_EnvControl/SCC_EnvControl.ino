@@ -1,5 +1,5 @@
 // =====================================================================
-//  SCC Chamber Environmental Control  —  Arduino UNO R3
+//  SCC Chamber Environmental Control  —  Arduino Mega 2560
 //
 //  Controls temperature and relative humidity of the 3.5 wt% NaCl salt
 //  fog inside a stress-corrosion-cracking (SCC) test chamber:
@@ -26,6 +26,10 @@
 #include <DHT.h>
 #include <Adafruit_RGBLCDShield.h>
 #include "config.h"
+
+#if !defined(ARDUINO_AVR_MEGA2560) && !defined(HOST_SIM)
+  #error "Select Tools > Board > Arduino AVR Boards > Arduino Mega or Mega 2560"
+#endif
 
 #ifdef USE_SD
   #include <SPI.h>
@@ -121,7 +125,7 @@ inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi 
 inline bool roomMode(float tSet) { return tSet < T_SET_MIN - 0.05f; }
 
 // Fixed-point float formatting / parsing without dtostrf, atof or
-// Print::print(float) — keeps the sketch inside the UNO's 32 KB flash.
+// Print::print(float) — compact code (originally written to fit an UNO).
 char *fmtFixed(char *out, float v, int8_t width, uint8_t dec) {
   static const uint16_t scale[] = {1, 10, 100};
   if (dec > 2) dec = 2;
@@ -684,7 +688,9 @@ void printStatus() {
 }
 
 void printHelp() {
-  Serial.println(F("# STATUS RUN STOP RESET HEADER TIME SET T|RH|LOG"));
+  Serial.println(F("# HELP | STATUS | RUN | STOP | RESET | HEADER"));
+  Serial.println(F("# SET T <C|ROOM> | SET RH <%> | SET LOG <s>"));
+  Serial.println(F("# TIME YYYY-MM-DD HH:MM:SS"));
 }
 
 void handleCommand(char *line) {
@@ -734,6 +740,32 @@ void serialLoop() {
 }
 
 // =====================================================================
+//  Buzzer and status LEDs
+// =====================================================================
+void setLeds(bool run, bool alarm, bool heat, bool mist) {
+  digitalWrite(PIN_LED_RUN,   run   ? LED_ON : !LED_ON);
+  digitalWrite(PIN_LED_ALARM, alarm ? LED_ON : !LED_ON);
+  digitalWrite(PIN_LED_HEAT,  heat  ? LED_ON : !LED_ON);
+  digitalWrite(PIN_LED_MIST,  mist  ? LED_ON : !LED_ON);
+}
+
+// buzzer : 0.4 s beep every 1.2 s for alarms not yet acknowledged
+//          (any key press acknowledges)
+// RUN    : off = stopped, 1 Hz blink = settling / out of tolerance,
+//          steady = stable within tolerance
+// ALARM  : off = none, 2.5 Hz blink = new alarm, steady = acknowledged
+// HEAT / MIST : follow the heater and mist-head outputs
+void updateIndicators(unsigned long now) {
+  bool fresh = alarms & ~alarmsMuted;
+  digitalWrite(PIN_BUZZER, (fresh && (now / 400UL) % 3 == 0) ? HIGH : LOW);
+
+  bool slow = (now / 500UL) & 1, fast = (now / 200UL) & 1;
+  bool run   = cfg.running && (stable && !alarms ? true : slow);
+  bool alarm = alarms && (fresh ? fast : true);
+  setLeds(run, alarm, heaterOn, mistOn);
+}
+
+// =====================================================================
 //  setup / loop
 // =====================================================================
 void setup() {
@@ -744,7 +776,15 @@ void setup() {
   pinMode(PIN_MIST, OUTPUT);
   pinMode(PIN_VENT, OUTPUT);
   pinMode(PIN_CIRC_FAN, OUTPUT);
-  pinMode(PIN_ALARM, OUTPUT);
+  pinMode(PIN_BUZZER, OUTPUT);
+  pinMode(PIN_LED_RUN, OUTPUT);
+  pinMode(PIN_LED_ALARM, OUTPUT);
+  pinMode(PIN_LED_HEAT, OUTPUT);
+  pinMode(PIN_LED_MIST, OUTPUT);
+  setLeds(true, true, true, true);      // lamp test while starting up
+  digitalWrite(PIN_BUZZER, HIGH);       // short start-up beep
+  delay(150);
+  digitalWrite(PIN_BUZZER, LOW);
   writeOutputs();                       // everything off
 
   Serial.begin(SERIAL_BAUD);
@@ -813,8 +853,5 @@ void loop() {
     drawScreen();
   }
 
-  // alarm output (buzzer or lamp of a lighted button): blinks for
-  // un-acknowledged alarms, any key press acknowledges
-  bool beep = (alarms & ~alarmsMuted) && ((now / 400UL) % 3 == 0);
-  digitalWrite(PIN_ALARM, beep ? HIGH : LOW);
+  updateIndicators(now);
 }

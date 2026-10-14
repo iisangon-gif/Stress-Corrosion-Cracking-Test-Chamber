@@ -50,7 +50,7 @@ def main():
 
     out = args.out or dt.datetime.now().strftime("chamber_%Y%m%d_%H%M%S.csv")
 
-    # Keep DTR low while opening so the UNO is not reset by the connection.
+    # Keep DTR low while opening so the Arduino is not reset by the connection.
     ser = serial.Serial()
     ser.port, ser.baudrate, ser.timeout = args.port, args.baud, 1
     ser.dtr = False

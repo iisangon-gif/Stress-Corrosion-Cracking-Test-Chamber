@@ -4,14 +4,15 @@
 
 | Item | Requirement | How it is met |
 |---|---|---|
-| Controller | Arduino UNO R3 | ATmega328P. The sketch uses 31,806 of 32,256 bytes of flash and 1,467 of 2,048 bytes of static RAM |
+| Controller | Arduino Mega 2560 | ATmega2560. The sketch uses ~33 KB of 256 KB flash and 1.5 KB of 8 KB RAM |
 | Chamber | plastic box 50 × 80 × 50 cm (W × L × H) = 200 L | 4 mist heads are sufficient (7–28 % duty). Heater 200 W with 20 mm insulation, 300 W without |
 | Environment | salt fog of 3.5 wt% NaCl (ASTM conformance not required) | 4 USB ultrasonic mist heads in the salt solution, switched together |
 | Sensor | 1 × DHT | **DHT22 / AM2302** (see §5) |
 | Operating range | **20–40 °C or ROOM**, **20–80 %RH**, humidity mainly by the mist | heater only (no cooler). RH below the room air's moisture needs a dried inlet (§3.3) |
 | Set-points | target %RH and °C | from the LCD keypad or USB serial, saved in EEPROM |
 | Tolerance | ±2 %RH, ±1 °C | PID / split-range PI. Simulated worst case over 15 chamber variants: ±0.71 °C, ±1.26 %RH |
-| Display / input | 16×2 I²C LCD shield with buttons | Adafruit RGB LCD Shield (MCP23017, 5 keys, uses A4/A5 only) |
+| Display / input | 16×2 I²C LCD shield with buttons | Adafruit RGB LCD Shield (MCP23017, 5 keys, I²C only) |
+| Status indication | buzzer + LEDs | buzzer (D8), green RUN / red ALARM / amber HEATER / blue MIST LEDs (D22–D28), plus the LCD backlight colour |
 | Recording | T and RH logged | CSV on microSD (RTC time stamps) and CSV on USB serial |
 | Corrosion | heater module sits inside the salt fog | 24 VDC pad, coated heat sink, sealed leads, IP68 fan, bimetal + thermal fuse, mounted away from the mist ([design-notes-th.md §0.5](design-notes-th.md)). The fresh-air blower is outside |
 
@@ -26,15 +27,16 @@ flowchart LR
         CF[IP68 fan through<br/>the heater fins]
     end
     FA[Fresh-air blower<br/>outside] -. room air in .-> Chamber
-    DHT -- data D2 --> UNO
-    UNO[Arduino UNO R3] -- D3 --> M1[DC/DC SSR<br/>in 12 V feed] --> BK[12→5 V step-down] -- 5 V --> MIST
-    UNO -- D5 --> S1[Heater SSR<br/>DC/DC for 24 V pad] --> HTR
-    UNO -- D6 --> M2[MOSFET / SSR-DD] --> FA
-    UNO -- D7 --> M3[DC/DC SSR / MOSFET] --> CF
-    UNO -- D8 --> AL[Buzzer or lighted button]
-    UNO <-- I2C --> LCD[RGB LCD shield<br/>16x2 + 5 keys]
-    UNO <-- I2C / SPI --> LOG[Data-logging shield<br/>RTC + microSD]
-    UNO <-- USB --> PC[PC: serial_logger.py]
+    DHT -- data D2 --> MEGA
+    MEGA[Arduino Mega 2560] -- D3 --> M1[DC/DC SSR<br/>in 12 V feed] --> BK[12→5 V step-down] -- 5 V --> MIST
+    MEGA -- D5 --> S1[Heater SSR<br/>DC/DC for 24 V pad] --> HTR
+    MEGA -- D6 --> M2[MOSFET / SSR-DD] --> FA
+    MEGA -- D7 --> M3[DC/DC SSR / MOSFET] --> CF
+    MEGA -- D8 --> AL[Buzzer]
+    MEGA -- D22..D28 --> LED[Status LEDs<br/>RUN / ALARM / HEAT / MIST]
+    MEGA <-- I2C --> LCD[RGB LCD shield<br/>16x2 + 5 keys]
+    MEGA <-- I2C / SPI --> LOG[Data-logging shield<br/>RTC + microSD]
+    MEGA <-- USB --> PC[PC: serial_logger.py]
 ```
 
 | Actuator | Effect | Control signal |
@@ -43,7 +45,8 @@ flowchart LR
 | 4 × ultrasonic mist heads (5 V USB, own drivers, all together) | adds salt fog, raises RH | D3 → DC/DC SSR in the 12 V feed of the 12→5 V step-down (or in the + line of a separate 5 V supply): timed bursts in a 4 s window, ≥ 0.3 s each (or SSR on the adapter's 230 V input: 6 s window, ≥ 1 s) |
 | Fresh-air blower outside + passive outlet | lowers RH (and T) by blowing drier room air in | D6, time-proportioned in a 10 s window |
 | Heater / circulation fan (IP68) | blows air through the heater fins and mixes the chamber | D7, **on whenever running** (the heater never heats without air flow) |
-| Alarm (buzzer or lighted button) | tells the operator | D8, blinks 0.4 s every 1.2 s |
+| Buzzer | tells the operator about new alarms | D8, beeps 0.4 s every 1.2 s until a key is pressed |
+| Status LEDs | show the state at a glance | D22 green RUN (steady = in tolerance, blink = settling), D24 red ALARM (fast blink = new, steady = acknowledged), D26 amber HEATER, D28 blue MIST |
 
 **Every output is on/off.** Each output's demand of *x* % becomes ON for *x* % of a fixed window. This works with MOSFET modules, DC SSRs and zero-cross AC SSRs alike; fast PWM would not work with an AC SSR. On-times shorter than the minimum (e.g. 0.5 s for the mist heads) are carried over to the next window, so the average is still exact.
 
@@ -102,14 +105,14 @@ At 35 °C / 80 %RH, **a 1 °C change in air temperature changes RH by about 4.3 
 
 | Condition | Action |
 |---|---|
-| DHT22 fails 3 reads in a row (6 s) | heater, mist heads and blower off; LCD red "!SENSOR FAIL"; alarm output blinks |
+| DHT22 fails 3 reads in a row (6 s) | heater, mist heads and blower off; LCD red "!SENSOR FAIL"; buzzer beeps, red LED blinks |
 | T ≥ 60 °C (`T_ABS_MAX`) | heater and mist off, blower 100 %, alarm |
 | Out of tolerance > 10 min after having been stable (e.g. salt solution ran out, lid left open, heater failed) | "!OUT OF BAND" alarm, logged |
-| Any key press | acknowledges the current alarms (the output stops blinking) |
+| Any key press | acknowledges the current alarms: the buzzer stops, and the red LED goes from blinking to steady |
 | Program hang | 8 s hardware watchdog. All outputs start OFF and the settings are restored from EEPROM |
 | Independent of software | **KSD301 75 °C bimetal + ~100 °C thermal fuse on the heater heat sink** (also cover a stopped fan, which software cannot detect) |
 
-**Removed to fit the UNO:** the salt-solution low-level switch and the door switch. Check the solution level by eye, and press STOP before opening the lid. See [design-notes-th.md §1](design-notes-th.md).
+**Not fitted (by choice):** the salt-solution low-level switch and the door switch. Check the solution level by eye, and press STOP before opening the lid. See [design-notes-th.md §1](design-notes-th.md).
 
 **Stability statistics.** Once T and RH have stayed in tolerance for 5 minutes, the chamber is marked **stable** and the backlight turns green. From then on the controller counts the in-tolerance fraction and the maximum |ΔT| and |ΔRH|.
 

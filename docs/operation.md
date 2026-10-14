@@ -12,7 +12,7 @@
 4. Check `config.h`:
    * `RTC_IS_PCF8523 1` for the Adafruit Data Logging Shield rev B, or `0` for DS1307 shields/clones
    * comment out `USE_SD` / `USE_RTC` if you do not fit the logging shield
-5. Select **Tools → Board → Arduino UNO** and upload.
+5. Select **Tools → Board → Arduino AVR Boards → Arduino Mega or Mega 2560** (Processor: ATmega2560) and upload. Choosing UNO stops the build with an error, because the LED pins exist only on the Mega.
 6. Open the Serial Monitor at **115200 baud**, line ending **Newline**, and set the clock once:
    ```
    TIME 2026-10-14 09:00:00
@@ -25,7 +25,7 @@
 | **UP / DOWN** | change screen | previous / next setting |
 | **LEFT / RIGHT** | – | decrease / increase value (hold to repeat, ×10 after 2 s) |
 | **SELECT** | open menu | **save** and leave the menu |
-| any key | acknowledge alarm (buzzer / button lamp stops blinking) | – |
+| any key | acknowledge alarm: the buzzer stops, and the red LED turns steady | – |
 
 If no key is pressed for 30 s, the menu closes **without saving**.
 
@@ -42,6 +42,18 @@ If no key is pressed for 30 s, the menu closes **without saving**.
 
 Status tag on the main screen: `..` = settling, `OK` = stable (in tolerance for 5 min), `!!` = alarm.
 **Backlight colour:** yellow = settling, **green = stable in tolerance**, red = alarm, white = stopped, teal = menu.
+
+**Status LEDs and buzzer:**
+
+| Indicator | Off | Blinking | Steady |
+|---|---|---|---|
+| Green RUN (D22) | stopped | settling / out of tolerance | stable within ±1 °C / ±2 %RH |
+| Red ALARM (D24) | no alarm | new alarm (fast blink) | alarm acknowledged, still active |
+| Amber HEATER (D26) | heater off | – (pulses with the 2 s heater cycle) | – |
+| Blue MIST (D28) | mist off | – (pulses with each mist burst) | – |
+| Buzzer (D8) | silent | beeps 0.4 s every 1.2 s for new alarms; press any key to silence | – |
+
+At power-on all LEDs light and the buzzer beeps once (lamp test).
 
 **Menu items:** Set Temperature (20.0–40.0 °C in 0.1 steps; LEFT below 20.0 gives **ROOM** = no heating, temperature only logged), Set Humidity (20–80 %RH, 0.5 steps), Log interval (1–3600 s), Run / Stop. To reset the statistics, change a set-point or send `RESET`.
 
@@ -66,7 +78,7 @@ Lines starting with `#` are messages. All other lines are CSV data.
 
 ### Before opening the lid / refilling salt solution
 
-There is no door switch and no level switch, because they were removed to fit the UNO R3:
+There is no door switch and no level switch (not fitted):
 
 1. Press **SELECT**, **UP** ×1 to *Run / Stop*, **RIGHT** to show STOP, then **SELECT** (or type `STOP`). The mist heads, heater and fans switch off.
 2. Open the lid, inspect the specimens, and top up the 3.5 wt% NaCl solution. **Never let the mist heads run dry.**
@@ -88,7 +100,7 @@ timestamp,t_C,rh_pct,t_set_C,rh_set_pct,heater_pct,mist_pct,vent_pct,in_band,sta
   python tools/serial_logger.py --port COM3 --out run1.csv      # Windows
   python tools/serial_logger.py --port /dev/ttyACM0 --out run1.csv
   ```
-  The logger opens the port without toggling DTR, so connecting does not reset the UNO.
+  The logger opens the port without toggling DTR, so connecting does not reset the Mega.
 * **Plot and check the tolerance** of any log, from SD or PC:
   ```
   python tools/plot_log.py run1.csv          # shows chart + prints in-band statistics

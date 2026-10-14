@@ -6,19 +6,20 @@ The 200 L chamber produces a **3.5 wt% NaCl salt fog**. The electronics stay **o
 
 | # | Part | Qty | Recommended model / spec | Notes |
 |---|---|---|---|---|
-| 1 | Microcontroller | 1 | **Arduino UNO R3** | Flash 31,806 / 32,256 B, RAM 1,467 / 2,048 B |
+| 1 | Microcontroller | 1 | **Arduino Mega 2560** (R3) | Flash 33 KB / 256 KB, RAM 1.5 KB / 8 KB, so there is plenty of room for additions |
 | 2 | Temperature / humidity sensor | 1 | **DHT22 – AM2302 wired version** with a PTFE/sintered filter cap | lives in the fog: conformal-coat the leads and treat it as a consumable |
 | 3 | LCD with input keys | 1 | **Adafruit RGB LCD Shield 16×2** (MCP23017, I²C) or a compatible clone | 5 keys. The backlight shows status (green = in tolerance, red = alarm) |
-| 4 | Data logging | 1 | **Adafruit Data Logging Shield rev B** (microSD + PCF8523 RTC). DS1307 clones also work: set `RTC_IS_PCF8523 0` | stack it under the LCD shield |
+| 4 | Data logging | 1 | **Adafruit Data Logging Shield rev B** (microSD + PCF8523 RTC) | stack it under the LCD shield. Rev B reads the SD card through the ICSP header, so it works on a Mega. Clones with SPI on D11–D13 need jumpers ([wiring §1.1](wiring.md)). DS1307 clones: set `RTC_IS_PCF8523 0` |
 | 5 | microSD card + RTC cell | 1 | 2–32 GB FAT32, CR1220/CR2032 | |
 | 6 | Heater switch | 1 | 24 VDC pad: **DC/DC SSR ≥ 25 A**. 230 VAC pad: **SSR-25DA** (zero-cross). Mount on a heat sink | driven by D5, time-proportioned (2 s window). Same as item 19c |
 | 7 | Mist-head switch | 1 | **DC/DC SSR** (DC input 3–32 V, DC output, e.g. SSR-10DD / SSR-25DD, preferably MOSFET output), driven by D3 | The heads' own drivers have no control input, so their supply is switched; one SSR feeds all 4 drivers. **Best placed in the 12 V feed of the 12→5 V step-down**, where its 0.1–1.5 V drop does not matter. On the 5 V side, the SSR's load range must include 5 V, and the drivers must still see ≥ 4.75 V with all 4 running. A logic-level MOSFET module also works |
 | 8 | Fan switches | 2 | DC/DC SSRs or logic-level MOSFET modules | fresh-air blower (D6), heater/circulation fan (D7, required) |
 | 9 | Flyback diodes | 2 | 1N5819 | across each fan when switched by MOSFETs |
-| 10 | Alarm indicator | 1 | 5 V active buzzer **or** lighted push button (5 V LED) | D8. A 12/24 V lamp needs a MOSFET |
+| 10 | Buzzer | 1 | **5 V active buzzer** (≤ 20 mA, or via a transistor) | D8, beeps for alarms not yet acknowledged |
+| 10a | Status LEDs | 4 | 5 mm or panel-mount LEDs: **green, red, amber, blue** + 4 × 330 Ω (or 5 V panel LEDs with a built-in resistor) | D22 RUN/in tolerance, D24 ALARM, D26 HEATER, D28 MIST. Lighted push buttons can be used as the indicators instead |
 | 11 | Enclosure | 1 | IP65 box, cable glands, DIN terminals | |
 
-**Removed to stay within the UNO R3:** float switch for low salt-solution level, door reed switch, DS18B20 solution thermometer.
+**Not fitted (by choice):** float switch for low salt-solution level, door reed switch, DS18B20 solution thermometer. The Mega has free pins (D4, D9, D23–D49, A0–A15) if they are added later.
 
 ## B. Salt fog generation
 

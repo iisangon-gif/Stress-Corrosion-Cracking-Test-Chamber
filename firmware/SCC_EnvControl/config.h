@@ -1,6 +1,6 @@
 // =====================================================================
 //  config.h — hardware pins, options and tuning for SCC_EnvControl
-//  Board: Arduino UNO R3
+//  Board: Arduino Mega 2560
 // =====================================================================
 #pragma once
 
@@ -16,9 +16,9 @@
 #define RTC_IS_PCF8523    1
 
 // ---------------------------------------------------------------------
-//  Pins (UNO R3)
-//  A4/A5 (SDA/SCL) : LCD keypad shield + RTC (I2C bus)
-//  D10..D13        : SD card (SPI) on the Data Logging Shield
+//  Pins (Arduino Mega 2560)
+//  D20/D21 (SDA/SCL, also the SDA/SCL header next to AREF): LCD shield + RTC
+//  D50..D52 / ICSP (SPI) + D10 (CS): SD card on the Data Logging Shield
 // ---------------------------------------------------------------------
 #define PIN_DHT           2   // DHT22 data (pull-up to 5V, built into AM2302)
 #define PIN_MIST          3   // DC-DC SSR input -> 5 V supply of the 4 mist-head drivers
@@ -30,9 +30,16 @@
 #define PIN_CIRC_FAN      7   // SSR / MOSFET -> fan blowing through the heater fins
                               // (REQUIRED: on whenever the controller is running, so
                               // the heater never runs without air flow)
-#define PIN_ALARM         8   // active buzzer, or LED of a lighted push button
+#define PIN_BUZZER        8   // active buzzer (beeps for un-acknowledged alarms)
 #define PIN_SD_CS        10
-// free pins: D4, D9, A0..A3
+
+// Status LEDs (each LED + 330-1k resistor to GND, or 5 V panel LEDs)
+#define PIN_LED_RUN      22   // green : steady = stable in tolerance, blinking = settling
+#define PIN_LED_ALARM    24   // red   : fast blink = new alarm, steady = acknowledged
+#define PIN_LED_HEAT     26   // amber : heater output on
+#define PIN_LED_MIST     28   // blue  : mist heads on
+#define LED_ON          HIGH
+// free pins: D4, D9, D11-D13 (not used by SD on the Mega), D23.., A0..A15
 
 #define DHT_TYPE          DHT22   // AM2302
 
