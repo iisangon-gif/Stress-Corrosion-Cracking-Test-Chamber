@@ -21,7 +21,8 @@
 //  D10..D13        : SD card (SPI) on the Data Logging Shield
 // ---------------------------------------------------------------------
 #define PIN_DHT           2   // DHT22 data (pull-up to 5V, built into AM2302)
-#define PIN_MIST          3   // MOSFET / SSR -> 5V supply of the 4 ultrasonic mist heads
+#define PIN_MIST          3   // SSR on the 230 V input of the 5 V USB adapter feeding the
+                              // 4 ultrasonic mist heads (or a MOSFET on the 5 V side)
 #define PIN_HEATER        5   // SSR / MOSFET -> heater (outside the salt fog)
 #define PIN_VENT          6   // SSR / MOSFET -> fresh-air blower (outside the salt fog)
 #define PIN_CIRC_FAN      7   // SSR / MOSFET -> circulation fan (optional, IP68)
@@ -42,15 +43,17 @@
 // ---------------------------------------------------------------------
 //  Default set-points (changed from the keypad / serial, kept in EEPROM)
 // ---------------------------------------------------------------------
-#define DEF_T_SET        35.0   // degC
-#define DEF_RH_SET       80.0   // %RH
+#define DEF_T_SET        35.0   // degC (0 = ROOM: no heating, temperature only logged)
+#define DEF_RH_SET       70.0   // %RH
 #define DEF_LOG_SEC        60   // s between log records
 
 // Allowed set-point ranges
+// Below T_SET_MIN the temperature set-point becomes "ROOM" (heater off).
+// There is no cooler: a set-point must be ~3 degC above room temperature.
 #define T_SET_MIN        20.0
-#define T_SET_MAX        50.0
-#define RH_SET_MIN       30.0
-#define RH_SET_MAX       95.0
+#define T_SET_MAX        40.0
+#define RH_SET_MIN       20.0   // RH below the room air's moisture needs dried
+#define RH_SET_MAX       80.0   // inlet air (see docs/design-notes-th.md)
 
 // Required control tolerance (used for status colour, statistics, alarms)
 #define T_TOL             1.0   // +/- degC
@@ -69,17 +72,28 @@
 #define T_IZONE           1.5     // degC: integrate only this close to set-point
 
 // Humidity PI (split range): + -> mist heads, - -> fresh-air blower
-#define RH_KP             5.0     // % per %RH
-#define RH_KI             0.01    // % per (%RH * s)
+#define RH_KP             3.0     // % per %RH
+#define RH_KI             0.006   // % per (%RH * s)
 #define RH_IZONE          5.0     // %RH: integrate only this close to set-point
 
 // Time-proportioning windows (output % -> ON-time within the window).
 // Shorter ON-times are carried over to the next window, not lost.
 #define HEATER_WINDOW_MS 2000UL   // 2 s = 100 mains half-cycles for a zero-cross SSR
 #define HEATER_MIN_ON_MS   20UL
-#define MIST_WINDOW_MS   5000UL
-#define MIST_MIN_ON_MS    500UL   // mist heads need ~0.3-0.5 s to start (1000 if the
-                                  // SSR switches the 230 V side of the USB adapter)
+// Mist heads are sprayed in short timed bursts (not fast PWM). Short bursts
+// matter: 4 heads in a 40-60 L box add ~1 %RH per 0.5 s of mist.
+//   MIST_SWITCH_SSR 0: MOSFET on the 5 V side         -> 0.3 s bursts (recommended)
+//   MIST_SWITCH_SSR 1: SSR on the 230 V adapter input -> >= 1 s bursts (adapter start-up)
+#ifndef MIST_SWITCH_SSR
+#define MIST_SWITCH_SSR     0
+#endif
+#if MIST_SWITCH_SSR
+  #define MIST_WINDOW_MS  6000UL
+  #define MIST_MIN_ON_MS  1000UL
+#else
+  #define MIST_WINDOW_MS  4000UL
+  #define MIST_MIN_ON_MS   300UL
+#endif
 #define VENT_WINDOW_MS  10000UL
 #define VENT_MIN_ON_MS   1500UL   // fan spin-up time
 

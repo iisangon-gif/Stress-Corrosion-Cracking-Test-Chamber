@@ -6,7 +6,7 @@ unsigned long g_millis = 0;
 int g_pins[64], g_pwm[64];
 SerialT Serial;
 EEPROMClass EEPROM;
-float g_tSens = 34.9, g_rhSens = 79.5;
+float g_tSens = 34.9, g_rhSens = 69.5;
 bool g_dhtFail = false;
 uint8_t g_buttons = 0;
 char g_lcd[2][17];
@@ -41,7 +41,7 @@ int main() {
   setup();
   step(3000);
   expectRow(0, "T 34.9/35.0C", "main T");
-  expectRow(1, "H 79.5/80.0% RUN", "main RH");
+  expectRow(1, "H 69.5/70.0% RUN", "main RH");
 
   press(BUTTON_DOWN);  expectRow(0, "Heat", "outputs screen");
   press(BUTTON_DOWN);  expectRow(0, "Stabilizing", "stats screen");
@@ -52,9 +52,9 @@ int main() {
   press(BUTTON_RIGHT);
   press(BUTTON_RIGHT);            expectRow(1, " 35.2 C", "T +0.2");
   press(BUTTON_DOWN);
-  press(BUTTON_LEFT);             expectRow(1, " 79.5 %RH", "RH -0.5");
+  press(BUTTON_LEFT);             expectRow(1, " 69.5 %RH", "RH -0.5");
   press(BUTTON_SELECT);
-  expect(fabs(cfg.tSet - 35.2f) < 0.01f && fabs(cfg.rhSet - 79.5f) < 0.01f, "SELECT saves set-points");
+  expect(fabs(cfg.tSet - 35.2f) < 0.01f && fabs(cfg.rhSet - 69.5f) < 0.01f, "SELECT saves set-points");
 
   press(BUTTON_SELECT);
   press(BUTTON_RIGHT);
@@ -65,6 +65,21 @@ int main() {
   step(100);
   expect(fabs(cfg.tSet - 36.5f) < 0.01f && fabs(cfg.rhSet - 75.0f) < 0.01f, "serial SET");
   expect(Serial.out.find("# ERR") != std::string::npos, "out-of-range SET rejected");
+
+  // ROOM mode: below 20.0 C the temperature set-point becomes ROOM (no heating)
+  Serial.in = "SET T 20\n";
+  step(100);
+  press(BUTTON_SELECT);
+  press(BUTTON_LEFT);             expectRow(1, " ROOM C", "LEFT below 20 C -> ROOM");
+  press(BUTTON_RIGHT);            expectRow(1, " 20.0 C", "RIGHT from ROOM -> 20 C");
+  press(BUTTON_LEFT);
+  press(BUTTON_SELECT);
+  step(4000);
+  expectRow(0, "T 34.9/ROOMC", "main shows ROOM");
+  expect(heaterPct == 0 && g_pins[PIN_HEATER] == LOW, "ROOM mode: heater off");
+  Serial.in = "SET T 36.5\nSET T ROOM\n";
+  step(100);
+  expect(roomMode(cfg.tSet), "serial SET T ROOM");
 
   g_dhtFail = true;
   step(10000);

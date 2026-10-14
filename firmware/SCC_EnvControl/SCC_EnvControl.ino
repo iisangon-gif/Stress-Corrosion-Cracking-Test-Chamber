@@ -96,13 +96,12 @@ unsigned long lastCtrlMs = 0, lastLogMs = 0, lastLcdMs = 0, lastKeyPollMs = 0;
 //  UI state
 // ---------------------------------------------------------------------
 enum { SCR_MAIN, SCR_OUTPUTS, SCR_STATS, SCR_LOG, SCR_COUNT };
-enum { MENU_TSET, MENU_RHSET, MENU_LOG, MENU_RUN, MENU_RESET, MENU_COUNT };
+enum { MENU_TSET, MENU_RHSET, MENU_LOG, MENU_RUN, MENU_COUNT };
 
 uint8_t screen = SCR_MAIN;
 bool    inMenu = false;
 uint8_t menuItem = 0;
 Settings edit;                 // working copy while in the menu
-bool    resetRequested = false;
 unsigned long lastKeyMs = 0;
 uint8_t backlight = 0xFF;
 
@@ -113,6 +112,10 @@ uint8_t serialLen = 0;
 //  Helpers
 // =====================================================================
 inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+// tSet == 0 means "ROOM": no temperature control, temperature is only logged
+#define T_ROOM 0.0f
+inline bool roomMode(float tSet) { return tSet < T_SET_MIN - 0.05f; }
 
 // Fixed-point float formatting / parsing without dtostrf, atof or
 // Print::print(float) — keeps the sketch inside the UNO's 32 KB flash.
@@ -359,12 +362,13 @@ void controlStep() {
   if (!isnan(tPrev)) dTerm = -T_KD * (tMeas - tPrev) / dt;
   tPrev = tMeas;
   heaterPct = piStep(cfg.tSet, tMeas, tInt, T_KP, T_KI, dTerm, dt, 0, 100, T_IZONE);
+  if (roomMode(cfg.tSet)) { heaterPct = 0; tInt = 0; }
   if (alarms & ALM_OVERTEMP) { heaterPct = 0; tInt = 0; }
 
   // ---- humidity: one PI, split range
   //      rhOut > 0 -> mist heads, rhOut < 0 -> fresh-air blower
   float eRH = rhMeas - cfg.rhSet;
-  float eT  = tMeas - cfg.tSet;
+  float eT  = roomMode(cfg.tSet) ? 0 : tMeas - cfg.tSet;
   rhOut = piStep(cfg.rhSet, rhMeas, rhInt, RH_KP, RH_KI, 0, dt, -100, 100, RH_IZONE);
   mistPct = rhOut > 0 ? rhOut : 0;
   ventPct = rhOut < 0 ? -rhOut : 0;
@@ -423,12 +427,13 @@ void printNum(Print &p, float v, uint8_t dec) {
 }
 
 void writeRecord(Print &p) {
-  bool inBand = !isnan(tMeas) && fabs(tMeas - cfg.tSet) <= T_TOL &&
+  bool inBand = !isnan(tMeas) && (roomMode(cfg.tSet) || fabs(tMeas - cfg.tSet) <= T_TOL) &&
                 fabs(rhMeas - cfg.rhSet) <= RH_TOL;
   printTimestamp(p);            p.print(',');
   printNum(p, tMeas, 1);        p.print(',');
   printNum(p, rhMeas, 1);       p.print(',');
-  printNum(p, cfg.tSet, 1);     p.print(',');
+  if (roomMode(cfg.tSet)) p.print(F("ROOM")); else printNum(p, cfg.tSet, 1);
+  p.print(',');
   printNum(p, cfg.rhSet, 1);    p.print(',');
   printNum(p, heaterPct, 0);    p.print(',');
   printNum(p, mistPct, 0);      p.print(',');
@@ -484,6 +489,11 @@ char *fmt(char *out, float v, int8_t width, uint8_t dec) {
   return fmtFixed(out, v, width, dec);
 }
 
+char *fmtSet(char *out, float tSet) {   // 4 characters: "35.0" or "ROOM"
+  if (roomMode(tSet)) { strcpy_P(out, PSTR("ROOM")); return out; }
+  return fmt(out, tSet, 4, 1);
+}
+
 void setBacklight(uint8_t c) {
   if (c != backlight) { lcd.setBacklight(c); backlight = c; }
 }
@@ -504,16 +514,14 @@ void drawScreen() {
       case MENU_TSET:  name = PSTR("Set Temperature"); break;
       case MENU_RHSET: name = PSTR("Set Humidity");    break;
       case MENU_LOG:   name = PSTR("Log interval");    break;
-      case MENU_RUN:   name = PSTR("Run / Stop");      break;
-      default:         name = PSTR("Reset stats");     break;
+      default:         name = PSTR("Run / Stop");      break;
     }
     snprintf_P(l0, sizeof(l0), PSTR(">%S"), name);
     switch (menuItem) {
-      case MENU_TSET:  snprintf_P(l1, sizeof(l1), PSTR(" %s C"), fmt(a, edit.tSet, 4, 1)); break;
+      case MENU_TSET:  snprintf_P(l1, sizeof(l1), PSTR(" %s C"), fmtSet(a, edit.tSet)); break;
       case MENU_RHSET: snprintf_P(l1, sizeof(l1), PSTR(" %s %%RH"), fmt(a, edit.rhSet, 4, 1)); break;
       case MENU_LOG:   snprintf_P(l1, sizeof(l1), PSTR(" %u s"), edit.logSec); break;
-      case MENU_RUN:   snprintf_P(l1, sizeof(l1), PSTR(" %s"), edit.running ? "RUN" : "STOP"); break;
-      default:         snprintf_P(l1, sizeof(l1), PSTR(" %s"), resetRequested ? "YES" : "no"); break;
+      default:         snprintf_P(l1, sizeof(l1), PSTR(" %s"), edit.running ? "RUN" : "STOP"); break;
     }
     char row[20];
     snprintf_P(row, sizeof(row), PSTR("%-12.12s<  >"), l1);   // LEFT/RIGHT change value
@@ -526,7 +534,7 @@ void drawScreen() {
   switch (screen) {
     case SCR_MAIN: {
       const char *tag = !cfg.running ? "" : (alarms ? "!!" : (stable ? "OK" : ".."));
-      snprintf_P(l0, sizeof(l0), PSTR("T%s/%sC %s"), fmt(a, tMeas, 5, 1), fmt(b, cfg.tSet, 4, 1), tag);
+      snprintf_P(l0, sizeof(l0), PSTR("T%s/%sC %s"), fmt(a, tMeas, 5, 1), fmtSet(b, cfg.tSet), tag);
       if (alarms) snprintf_P(l1, sizeof(l1), PSTR("%S"), alarmText());
       else snprintf_P(l1, sizeof(l1), PSTR("H%s/%s%% %s"), fmt(a, rhMeas, 5, 1), fmt(b, cfg.rhSet, 4, 1),
                     cfg.running ? "RUN" : "STP");
@@ -574,15 +582,19 @@ void drawScreen() {
 
 void menuAdjust(int8_t dir, uint8_t accel) {
   switch (menuItem) {
-    case MENU_TSET:  edit.tSet  = clampf(edit.tSet  + dir * 0.1f * accel, T_SET_MIN, T_SET_MAX); break;
+    case MENU_TSET: {                 // below T_SET_MIN -> ROOM, RIGHT from ROOM -> T_SET_MIN
+      float t = roomMode(edit.tSet) ? (dir > 0 ? T_SET_MIN : T_ROOM)
+                                    : edit.tSet + dir * 0.1f * accel;
+      edit.tSet = t < T_SET_MIN - 0.05f ? T_ROOM : clampf(t, T_SET_MIN, T_SET_MAX);
+      break;
+    }
     case MENU_RHSET: edit.rhSet = clampf(edit.rhSet + dir * 0.5f * accel, RH_SET_MIN, RH_SET_MAX); break;
     case MENU_LOG: {
       int v = (int)edit.logSec + dir * (edit.logSec >= 60 ? 10 : 1) * accel;
       edit.logSec = v < 1 ? 1 : (v > 3600 ? 3600 : v);
       break;
     }
-    case MENU_RUN:   edit.running = !edit.running; break;
-    default:         resetRequested = !resetRequested; break;
+    default:         edit.running = !edit.running; break;
   }
 }
 
@@ -607,7 +619,7 @@ void handleKeys() {
     lastRepeat = now;
     pressed = keys & (BUTTON_LEFT | BUTTON_RIGHT);
     accel = (now - pressedAt > 2000) ? 10 : 1;
-    if (menuItem == MENU_RUN || menuItem == MENU_RESET) pressed = 0;   // no repeat for toggles
+    if (menuItem == MENU_RUN) pressed = 0;   // no repeat for the toggle
   }
   if (!pressed) {
     if (inMenu && now - lastKeyMs > 30000UL) inMenu = false;          // timeout: discard
@@ -616,7 +628,7 @@ void handleKeys() {
 
   if (!inMenu) {
     if (pressed & BUTTON_SELECT) {
-      inMenu = true; menuItem = 0; edit = cfg; resetRequested = false;
+      inMenu = true; menuItem = 0; edit = cfg;
     } else if (pressed & BUTTON_UP) {
       screen = (screen + SCR_COUNT - 1) % SCR_COUNT;
     } else if (pressed & BUTTON_DOWN) {
@@ -625,7 +637,6 @@ void handleKeys() {
   } else {
     if (pressed & BUTTON_SELECT) {      // save and leave
       applySettings(edit);
-      if (resetRequested) resetStats();
       inMenu = false;
       Serial.println(F("# settings saved"));
     } else if (pressed & BUTTON_UP) {
@@ -658,9 +669,7 @@ void printStatus() {
 }
 
 void printHelp() {
-  Serial.println(F("# HELP | STATUS | RUN | STOP | RESET | HEADER"));
-  Serial.println(F("# SET T <C> | SET RH <%> | SET LOG <s>"));
-  Serial.println(F("# TIME YYYY-MM-DD HH:MM:SS"));
+  Serial.println(F("# STATUS RUN STOP RESET HEADER TIME SET T|RH|LOG"));
 }
 
 void handleCommand(char *line) {
@@ -680,6 +689,7 @@ void handleCommand(char *line) {
     char *val = strtok(NULL, " ");
     float v = val ? parseNum(val) : NAN;
     if (!key || !val) ok = false;
+    else if (!strcasecmp(key, "T")  && !strcasecmp(val, "ROOM"))          s.tSet = T_ROOM;
     else if (!strcasecmp(key, "T")  && v >= T_SET_MIN  && v <= T_SET_MAX)  s.tSet = v;
     else if (!strcasecmp(key, "RH") && v >= RH_SET_MIN && v <= RH_SET_MAX) s.rhSet = v;
     else if (!strcasecmp(key, "LOG") && v >= 1 && v <= 3600)               s.logSec = (uint16_t)v;

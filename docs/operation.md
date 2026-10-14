@@ -43,14 +43,17 @@ If no key is pressed for 30 s, the menu closes **without saving**.
 Status tag on the main screen: `..` = settling, `OK` = stable (in tolerance for 5 min), `!!` = alarm.
 **Backlight colour:** yellow = settling, **green = stable in tolerance**, red = alarm, white = stopped, teal = menu.
 
-**Menu items:** Set Temperature (20.0–50.0 °C, 0.1 steps), Set Humidity (30–95 %RH, 0.5 steps), Log interval (1–3600 s), Run / Stop, Reset stats.
+**Menu items:** Set Temperature (20.0–40.0 °C in 0.1 steps; LEFT below 20.0 gives **ROOM** = no heating, temperature only logged), Set Humidity (20–80 %RH, 0.5 steps), Log interval (1–3600 s), Run / Stop. To reset the statistics, change a set-point or send `RESET`.
+
+The lowest reachable RH depends on the room air. See [design-notes-th.md §0.4](design-notes-th.md) for a table, and use a silica-gel cartridge on the fresh-air inlet for lower RH.
 
 ## 3. Serial commands (115200 baud)
 
 | Command | Action |
 |---|---|
-| `SET T 35.0` | temperature set-point (°C) |
-| `SET RH 80` | humidity set-point (%RH) |
+| `SET T 35.0` | temperature set-point, 20–40 °C |
+| `SET T ROOM` | no heating; temperature only logged |
+| `SET RH 70` | humidity set-point, 20–80 %RH |
 | `SET LOG 60` | log interval (s) |
 | `RUN` / `STOP` | start / stop control (STOP switches all outputs off) |
 | `RESET` | reset stability statistics |
@@ -65,7 +68,7 @@ Lines starting with `#` are messages. All other lines are CSV data.
 
 There is no door switch and no level switch, because they were removed to fit the UNO R3:
 
-1. Press **SELECT**, **DOWN** ×3 to *Run / Stop*, **RIGHT** to show STOP, then **SELECT** (or type `STOP`). The mist heads, heater and fans switch off.
+1. Press **SELECT**, **UP** ×1 to *Run / Stop*, **RIGHT** to show STOP, then **SELECT** (or type `STOP`). The mist heads, heater and fans switch off.
 2. Open the lid, inspect the specimens, and top up the 3.5 wt% NaCl solution. **Never let the mist heads run dry.**
 3. Close the lid, then **RUN**. The chamber re-stabilises, and the statistics restart.
 
@@ -108,7 +111,8 @@ The default gains come from simulation (see [control-design.md §7](control-desi
 | RH oscillates, mist heads and blower alternate | lower `RH_KP` (5 → 3) and `RH_KI` (0.01 → 0.006) |
 | RH sits 1–2 % below set-point for long | raise `RH_KI` slightly |
 | Blower pulses too short to spin up | raise `VENT_MIN_ON_MS` |
-| Mist heads switched by an SSR on the 230 V side of their USB adapter | set `MIST_MIN_ON_MS 1000` |
+| Mist heads switched by an SSR on the 230 V side of their USB adapter | set `MIST_SWITCH_SSR 1` (longer bursts: expect more RH ripple with strong mist) |
+| RH ripples with each mist burst | use the MOSFET mist switch, a bigger box, or fewer heads; lower `RH_KP` |
 | RH ripple follows T ripple | improve T first: add thermal mass and insulation (1 °C ≈ 4.3 %RH at 35 °C / 80 %RH) |
 
 Change one parameter at a time and re-upload. Settings in EEPROM (set-points, log interval) are kept.

@@ -6,7 +6,7 @@
 |---|---|---|---|
 | **A4 / SDA, A5 / SCL** | RGB LCD shield (0x20) + RTC (0x68) | I²C | provided by the stacked shields |
 | **D2** | DHT22 / AM2302 **DATA** | digital in/out | pull-up to 5 V is built into the AM2302. For a bare DHT22, add 10 kΩ (4.7 kΩ for cables > 3 m) |
-| **D3** | MOSFET → **5 V rail of the 4 ultrasonic mist heads** | digital out | time-proportioned, 5 s window |
+| **D3** | MOSFET → **5 V rail of the 4 ultrasonic mist heads** | digital out | timed bursts, 4 s window, ≥ 0.3 s (SSR option: 6 s / ≥ 1 s) |
 | **D5** | **SSR-25DA → 230 VAC silicone heater pad** | digital out | time-proportioned, 2 s window |
 | **D6** | MOSFET / SSR-DD → **fresh-air blower** | digital out | time-proportioned, 10 s window |
 | **D7** | MOSFET / SSR-DD → circulation fan (optional) | digital out | on while running |
@@ -51,7 +51,7 @@
 ```
 
 * **SSR-25DA only switches AC.** Never use it on a DC load, because it will not turn off.
-* **Mist heads:** use a MOSFET, not a DC SSR (its voltage drop would leave ~3.5 V). Alternatively, put an SSR-25DA on the **230 V input** of the 5 V USB adapter and set `MIST_MIN_ON_MS 1000` in `config.h`.
+* **Mist heads:** their drivers have no control input, so D3 switches their 5 V supply. Use a MOSFET (shortest bursts, best RH control), not a DC SSR (its voltage drop would leave ~3.5 V). Alternatively, put an SSR-25DA on the **230 V input** of the 5 V USB adapter and set `MIST_SWITCH_SSR 1` in `config.h`. Bursts are then ≥ 1 s, with more RH ripple when the mist is strong.
 * **Mechanical relays:** not suitable for the heater or mist heads. They switch every few seconds, which is about 20,000 cycles per day.
 * Fit a 1N5819 flyback diode (cathode to +) across each fan when it is switched by a MOSFET.
 * Mount the SSR on a heat sink if the heater draws more than about 5 A.

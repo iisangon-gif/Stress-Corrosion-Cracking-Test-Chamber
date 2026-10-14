@@ -4,11 +4,12 @@
 
 | Item | Requirement | How it is met |
 |---|---|---|
-| Controller | Arduino UNO R3 | ATmega328P. The sketch uses 31,870 of 32,256 bytes of flash and 1,480 of 2,048 bytes of static RAM |
+| Controller | Arduino UNO R3 | ATmega328P. The sketch uses 31,958 of 32,256 bytes of flash and 1,475 of 2,048 bytes of static RAM |
 | Environment | salt fog of 3.5 wt% NaCl (ASTM conformance not required) | 4 USB ultrasonic mist heads in the salt solution, switched together |
 | Sensor | 1 × DHT | **DHT22 / AM2302** (see §5) |
+| Operating range | **20–40 °C or ROOM**, **20–80 %RH**, humidity mainly by the mist | heater only (no cooler). RH below the room air's moisture needs a dried inlet (§3.3) |
 | Set-points | target %RH and °C | from the LCD keypad or USB serial, saved in EEPROM |
-| Tolerance | ±2 %RH, ±1 °C | PID / split-range PI. Simulated worst case over 11 chamber variants: ±0.77 °C, ±1.47 %RH |
+| Tolerance | ±2 %RH, ±1 °C | PID / split-range PI. Simulated worst case over 13 chamber variants: ±0.78 °C, ±1.30 %RH |
 | Display / input | 16×2 I²C LCD shield with buttons | Adafruit RGB LCD Shield (MCP23017, 5 keys, uses A4/A5 only) |
 | Recording | T and RH logged | CSV on microSD (RTC time stamps) and CSV on USB serial |
 | Corrosion | heater and fans must survive the salt fog | heater pad and fresh-air blower are mounted **outside** the fog ([design-notes-th.md §2.4](design-notes-th.md)) |
@@ -38,7 +39,7 @@ flowchart LR
 | Actuator | Effect | Control signal |
 |---|---|---|
 | Silicone heater pad (230 VAC, 100–150 W) on the outer wall | raises T (and lowers RH) | D5 → SSR-25DA, time-proportioned in a 2 s window |
-| 4 × ultrasonic mist heads (5 V USB, all together) | adds salt fog, raises RH | D3 → MOSFET, time-proportioned in a 5 s window |
+| 4 × ultrasonic mist heads (5 V USB, own drivers, all together) | adds salt fog, raises RH | D3 → MOSFET on the 5 V rail: timed bursts in a 4 s window, ≥ 0.3 s each (or SSR on the adapter's 230 V input: 6 s window, ≥ 1 s) |
 | Fresh-air blower outside + passive outlet | lowers RH (and T) by blowing drier room air in | D6, time-proportioned in a 10 s window |
 | Circulation fan (optional, IP68) | mixes the air | D7, on while running |
 | Alarm (buzzer or lighted button) | tells the operator | D8, blinks 0.4 s every 1.2 s |
@@ -69,15 +70,28 @@ heater = clamp(P + I + D, 0, 100) %      → 2 s time-proportioning on D5
 
 ```
 e = RH_set − RH
-u = RH_KP · e + I            RH_KP = 5 %/%RH,  RH_KI = 0.01 %/(%RH·s),  integral zone ±5 %RH
+u = RH_KP · e + I            RH_KP = 3 %/%RH,  RH_KI = 0.006 %/(%RH·s),  integral zone ±5 %RH
 
-u > 0  → mist heads       = u    (5 s window, min ON 0.5 s)
+u > 0  → mist heads       = u    (timed bursts: 4 s window, min burst 0.3 s)
 u < 0  → fresh-air blower = −u   (10 s window, min ON 1.5 s)
 ```
 
-One continuous PI drives both actuators, so the mist heads and the blower never run together, and the hand-over between them is smooth. In practice the chamber loses moisture through leaks and the passive outlet, so the blower is rarely needed. The simulation never used it in steady state.
+One continuous PI drives both actuators, so the mist heads and the blower never run together, and the hand-over between them is smooth. In practice the chamber loses moisture through leaks and the passive outlet, so the blower is mainly used to step RH down.
 
-### 3.3 Coupling between T and RH
+**Why the mist bursts must be short.** The heads have their own drivers, so the Arduino can only switch their 5 V supply on and off. Four heads (~30–40 mL/h each) in a 40–60 L box add about **1 %RH per 0.5 s of mist**. The minimum burst therefore sets the RH ripple. At 25 °C (ROOM mode), where 1 g/m³ ≈ 4.3 %RH, simulation with strong mist gives:
+
+| Mist switch | Shortest burst | Worst RH deviation |
+|---|---|---|
+| MOSFET on the 5 V rail (`MIST_SWITCH_SSR 0`, default) | 0.3 s | ±1.3 %RH ✅ |
+| SSR on the 230 V input of the USB adapter (`MIST_SWITCH_SSR 1`) | 1 s (adapter start-up ~0.5 s) | ±2.2 %RH ❌; passes with moderate mist (bigger box / fewer heads) |
+
+### 3.3 Operating range and its physical limits
+
+* **Temperature 20–40 °C, or ROOM.** Below 20.0 °C in the menu (or `SET T ROOM`) the heater is disabled and the temperature is only logged; the ±1 °C check is skipped. Because there is no cooler, a set-point must be at least ~3 °C above room temperature.
+* **Humidity 20–80 %RH.** The mist can only add moisture. The lowest reachable RH is the room air's moisture content at chamber temperature: for a room at 25 °C / 50 %RH it is 50 / 37 / 28 / 21 %RH at 25 / 30 / 35 / 40 °C, and for 30 °C / 70 %RH it is 70 / 53 / 40 %RH at 30 / 35 / 40 °C. Lower set-points need a silica-gel cartridge on the fresh-air blower inlet, or dry compressed air.
+* NaCl deliquesces at ~75 %RH. Below that, salt deposited on specimens dries to crystals, so the corrosion rate drops sharply.
+
+### 3.4 Coupling between T and RH
 
 At 35 °C / 80 %RH, **a 1 °C change in air temperature changes RH by about 4.3 %RH** at constant moisture content. Holding ±2 %RH therefore needs temperature held to about ±0.3 °C. That is why the temperature loop is tuned tighter than ±1 °C, and why the heater-to-air coupling matters (§6).
 
@@ -124,25 +138,31 @@ The unmodified firmware was compiled on a PC against stubbed Arduino I/O and run
 * Magnus saturation
 * first-order DHT22 lag and 0.1-unit quantisation
 
-The 8-hour scenario: 25 °C / 60 %RH → **35 °C / 80 %RH** → step to **40 °C / 70 %RH** at 4 h → **lid opened for 60 s** at 6 h.
+The 8-hour scenario: room conditions → **set-point 1** → step to **set-point 2** at 4 h → **lid opened for 60 s** at 6 h. The chart shows the nominal case (35 °C / 70 % → 40 °C / 40 %).
 
 ![Simulated response](img/simulated-response.png)
 
-| Chamber variant | 35 °C / 80 % steady | 40 °C / 70 % steady | 15 min after lid opening → end |
-|---|---|---|---|
-| nominal: air 3 kJ/K, wall 0.8 kJ/K @ 4 W/K, 100 W pad, mist 0.3 g/m³s, sensor τ 10 s | ±0.07 °C, ±0.69 %RH | ±0.06 °C, ±0.30 %RH | ±0.46 °C, ±0.59 %RH |
-| 2× mist, sensor τ 20 s | ±0.08 °C, ±0.93 %RH | ±0.06 °C, ±0.62 %RH | ±0.51 °C, ±0.65 %RH |
-| 3× mist, sensor τ 30 s | ±0.08 °C, ±1.47 %RH | ±0.07 °C, ±1.06 %RH | ±0.55 °C, ±1.15 %RH |
-| ½× mist, sensor τ 5 s | ±0.06 °C, ±0.33 %RH | ±0.06 °C, ±0.27 %RH | ±0.45 °C, ±0.78 %RH |
-| low thermal mass, poor insulation | ±0.06 °C, ±0.64 %RH | ±0.05 °C, ±0.31 %RH | ±0.39 °C, ±0.47 %RH |
-| tiny box, strong mist, τ 25 s | ±0.02 °C, ±1.13 %RH | ±0.11 °C, ±0.89 %RH | ±0.12 °C, ±0.91 %RH |
-| large thermal mass, 150 W | ±0.07 °C, ±0.65 %RH | ±0.08 °C, ±0.30 %RH | ±0.77 °C, ±0.44 %RH |
-| small heater 50 W | ±0.04 °C, ±0.65 %RH | ±0.02 °C, ±0.33 %RH | ±0.43 °C, ±0.39 %RH |
-| cold, dry room (20 °C, 40 %RH) | ±0.06 °C, ±0.44 %RH | ±0.07 °C, ±0.39 %RH | ±0.49 °C, ±0.71 %RH |
-| warm, humid room (30 °C, 75 %RH) | ±0.07 °C, ±0.45 %RH | ±0.06 °C, ±0.38 %RH | ±0.51 °C, ±0.52 %RH |
-| *thick plastic wall 2 kJ/K @ 2 W/K (informational)* | ±0.38 °C, ±0.67 %RH | ±0.51 °C, ±0.45 %RH | **±1.26 °C**, ±0.53 %RH (90.7 % in band) |
+Default room 25 °C / 60 %RH, 4 mist heads ≈ 0.7 g/m³s (40–60 L box), MOSFET mist switch, set-points 35 °C / 70 % then 40 °C / 40 %, unless stated.
 
-All variants except the informational thick-wall case stayed **100 % within ±1 °C / ±2 %RH**. The model is well mixed, so a real chamber will show more ripple. Confirm on the hardware ([operation.md §5](operation.md#5-tuning-on-the-real-chamber)).
+| Chamber variant | set-point 1 steady | set-point 2 steady | 15 min after lid opening → end |
+|---|---|---|---|
+| nominal | ±0.07 °C, ±0.53 %RH | ±0.06 °C, ±0.32 %RH | ±0.46 °C, ±0.56 %RH |
+| ROOM mode, 75 % → 40 % (room 25 °C / 30 %) | –, ±0.76 %RH | –, ±0.45 %RH | –, ±0.52 %RH |
+| low limit 20 °C, 80 % → 50 % (room 17 °C) | ±0.06 °C, ±0.87 %RH | ±0.06 °C, ±0.54 %RH | ±0.39 °C, ±0.59 %RH |
+| 30 °C / 50 % → 40 °C / 20 % (dry room 25 °C / 35 %) | ±0.04 °C, ±0.53 %RH | ±0.06 °C, ±0.20 %RH | ±0.49 °C, ±0.26 %RH |
+| Thai room 30 °C / 70 %: 35 °C / 75 % → 40 °C / 60 % | ±0.07 °C, ±0.51 %RH | ±0.07 °C, ±0.34 %RH | ±0.51 °C, ±0.51 %RH |
+| weak mist (big box), sensor τ 5 s | ±0.06 °C, ±0.30 %RH | ±0.06 °C, ±0.25 %RH | ±0.45 °C, ±0.90 %RH |
+| very strong mist, slow sensor τ 30 s | ±0.08 °C, ±0.81 %RH | ±0.07 °C, ±0.48 %RH | ±0.55 °C, ±0.57 %RH |
+| very strong mist, ROOM 80 % → 30 % | –, ±1.30 %RH | –, ±0.59 %RH | –, ±0.60 %RH |
+| low thermal mass, poor insulation | ±0.06 °C, ±0.53 %RH | ±0.05 °C, ±0.31 %RH | ±0.40 °C, ±0.36 %RH |
+| tiny box, very strong mist | ±0.02 °C, ±0.94 %RH | ±0.11 °C, ±0.48 %RH | ±0.12 °C, ±0.45 %RH |
+| large thermal mass, 150 W | ±0.08 °C, ±0.55 %RH | ±0.08 °C, ±0.33 %RH | ±0.78 °C, ±0.46 %RH |
+| small heater 50 W | ±0.04 °C, ±0.50 %RH | ±0.02 °C, ±0.27 %RH | ±0.43 °C, ±0.35 %RH |
+| SSR mist switch, moderate mist | ±0.07 °C, ±0.88 %RH | ±0.06 °C, ±0.50 %RH | ±0.46 °C, ±0.79 %RH |
+| *SSR mist switch, strong mist, ROOM (informational)* | –, **±2.24 %RH** | –, ±1.69 %RH | –, **±2.06 %RH** |
+| *thick plastic wall 2 kJ/K @ 2 W/K (informational)* | ±0.38 °C, ±0.55 %RH | ±0.53 °C, ±0.36 %RH | **±1.22 °C**, ±0.46 %RH |
+
+All variants except the two informational cases stayed **100 % within ±1 °C / ±2 %RH**. The model is well mixed, so a real chamber will show more ripple. Confirm on the hardware ([operation.md §5](operation.md#5-tuning-on-the-real-chamber)).
 
 ## 8. Timing summary
 
@@ -150,7 +170,7 @@ All variants except the informational thick-wall case stayed **100 % within ±1 
 |---|---|
 | DHT22 read + both control loops | 2 s |
 | Heater time-proportioning | 2 s window, min ON 20 ms |
-| Mist heads time-proportioning | 5 s window, min ON 0.5 s (carry-over) |
+| Mist heads (timed bursts) | 4 s window, min burst 0.3 s, carry-over (SSR option: 6 s / 1 s) |
 | Fresh-air blower time-proportioning | 10 s window, min ON 1.5 s |
 | Keypad poll / LCD refresh | 50 ms / 500 ms |
 | Log record (SD + serial) | 60 s default (1–3600 s) |

@@ -19,6 +19,7 @@ using std::isnan;
 #define HEX 16
 #define F(s) (s)
 #define PSTR(s) (s)
+#define strcpy_P strcpy
 
 extern unsigned long g_millis;   // simulated clock (ms)
 extern int g_pins[64];           // digital output levels

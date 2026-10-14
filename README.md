@@ -38,7 +38,8 @@ Arduino UNO R3 controller for a small **stress corrosion cracking (SCC) test cha
 
 * **Sensor:** DHT22 / AM2302 with a filter cap.
 * **Temperature:** PID → silicone heater pad on the outside wall, switched by an SSR-25DA (2 s time-proportioning).
-* **Humidity / fog:** one split-range PI. Positive output → the 4 mist heads, switched together on one 5 V rail (5 s window). Negative output → fresh-air blower.
+* **Operating range:** **20–40 °C or ROOM** (no heating), **20–80 %RH**, with humidity controlled mainly by the mist. There is no cooler, and RH below the room air's moisture needs a silica-gel inlet.
+* **Humidity / fog:** one split-range PI. Positive output → the 4 mist heads (own drivers, switched together on one 5 V rail) sprayed in **timed bursts** of ≥ 0.3 s. Negative output → fresh-air blower.
 * **All outputs are on/off** (time-proportioned), so MOSFET modules or SSRs both work.
 * **Input / display:** set T and RH with the keypad (or serial), saved in EEPROM. The backlight turns **green** when stable in tolerance and **red** on alarm.
 * **Recording:** CSV to microSD (one file per day, RTC time stamps) and to USB serial.
@@ -50,11 +51,11 @@ Arduino UNO R3 controller for a small **stress corrosion cracking (SCC) test cha
 2. Mix the solution: **35.0 g NaCl + 965.0 g DI water per kg**.
 3. In Arduino IDE, install **DHT sensor library**, **Adafruit Unified Sensor**, **Adafruit RGB LCD Shield Library** and **SD**.
 4. Open `firmware/SCC_EnvControl/SCC_EnvControl.ino`, check `config.h`, and upload to **Arduino UNO**.
-5. Serial Monitor at 115200 baud: `TIME 2026-10-14 09:00:00`, then `SET T 35` and `SET RH 80`. Or press **SELECT** on the keypad.
+5. Serial Monitor at 115200 baud: `TIME 2026-10-14 09:00:00`, then `SET T 35` (or `SET T ROOM`) and `SET RH 70`. Or press **SELECT** on the keypad.
 6. Wait for the green backlight. Press **STOP** before opening the lid.
 
 ## Firmware facts
 
-* UNO R3 usage: **31,870 / 32,256 bytes of flash, 1,480 / 2,048 bytes of RAM**.
-* On every push, GitHub Actions compiles the sketch for `arduino:avr:uno` and runs `test/sim/run.sh`. That covers the UI, fail-safe behaviour, and closed-loop tolerance checks on 10 simulated chamber variants.
+* UNO R3 usage: **31,958 / 32,256 bytes of flash, 1,475 / 2,048 bytes of RAM**.
+* On every push, GitHub Actions compiles the sketch for `arduino:avr:uno` and runs `test/sim/run.sh`. That covers the UI, fail-safe behaviour, and closed-loop tolerance checks on 13 simulated chamber variants across the operating range.
 * Gains come from simulation. Verify them on your chamber ([operation.md §5](docs/operation.md#5-tuning-on-the-real-chamber)).
