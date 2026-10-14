@@ -12,8 +12,8 @@ The chamber produces a **3.5 wt% NaCl salt fog**. Everything metallic or electro
 | 4 | Data logging | 1 | **Adafruit Data Logging Shield rev B** (microSD + PCF8523 RTC). DS1307 clones also work: set `RTC_IS_PCF8523 0` | stack it under the LCD shield |
 | 5 | microSD card + RTC cell | 1 | 2–32 GB FAT32, CR1220/CR2032 | |
 | 6 | Heater switch (230 VAC heater) | 1 | **SSR-25DA** (3–32 VDC in, 24–380 VAC out, zero-cross) + heat sink | driven by D5, time-proportioned (2 s window) |
-| 7 | Mist-head switch | 1 | **logic-level MOSFET module** (AOD4184 / D4184 or IRLZ44N board) on the 5 V rail | The heads' own drivers have no control input, so their 5 V supply is switched. A MOSFET allows 0.3 s bursts, which gives the finest RH control. Alternative: a second SSR-25DA on the 230 V input of the USB adapter (`MIST_SWITCH_SSR 1`), giving ≥ 1 s bursts and more RH ripple. *Not* a DC SSR: its ~1.5 V drop starves the 5 V heads |
-| 8 | Fan switches | 2 | logic-level MOSFET modules (or SSR-DD DC SSRs) | fresh-air blower (D6), circulation fan (D7, optional) |
+| 7 | Mist-head switch | 1 | **DC/DC SSR** (DC input 3–32 V, DC output, e.g. SSR-10DD / SSR-25DD, preferably MOSFET output), driven by D3 | The heads' own drivers have no control input, so their supply is switched; one SSR feeds all 4 drivers. **Best placed in the 12 V feed of the 12→5 V step-down**, where its 0.1–1.5 V drop does not matter. On the 5 V side, the SSR's load range must include 5 V, and the drivers must still see ≥ 4.75 V with all 4 running. A logic-level MOSFET module also works |
+| 8 | Fan switches | 2 | DC/DC SSRs or logic-level MOSFET modules | fresh-air blower (D6), circulation fan (D7, optional) |
 | 9 | Flyback diodes | 2 | 1N5819 | across each fan when switched by MOSFETs |
 | 10 | Alarm indicator | 1 | 5 V active buzzer **or** lighted push button (5 V LED) | D8. A 12/24 V lamp needs a MOSFET |
 | 11 | Enclosure | 1 | IP65 box, cable glands, DIN terminals | |
@@ -25,7 +25,7 @@ The chamber produces a **3.5 wt% NaCl salt fog**. Everything metallic or electro
 | # | Part | Qty | Spec | Notes |
 |---|---|---|---|---|
 | 12 | **Ultrasonic mist heads** | 4 | USB 5 V mist modules with their own driver boards, all powered together | must **start misting when powered** (no button press) |
-| 13 | 5 V supply for mist heads | 1 | **5 V ≥ 3 A** (4 × ~0.5 A + margin): USB adapter 5 V 4 A, or a 12→5 V 5 A buck converter | |
+| 13 | 5 V supply for mist heads | 1 | **12→5 V step-down ≥ 5 A** (e.g. XL4015; an "LM2596 3 A" module only manages ~2 A continuously), or a separate 5 V ≥ 3 A supply | 4 × ~0.5 A ≈ 2 A (check the heads' labels). Set the output to 5.0–5.1 V under load |
 | 14 | USB-A female sockets / 4-way splitter | 1 | – | one switched 5 V rail feeds all 4 heads |
 | 15 | Salt solution reservoir | 1 | PP/PE tank with lid | holds the 3.5 wt% NaCl the heads float in or draw from |
 | 16 | Reagent NaCl + DI water | – | NaCl ≥ 99.5 %, DI water ≤ 20 µS/cm | 35.0 g NaCl + 965.0 g water per kg |
@@ -51,8 +51,8 @@ The chamber produces a **3.5 wt% NaCl salt fog**. Everything metallic or electro
 
 | # | Part | Qty | Spec | Notes |
 |---|---|---|---|---|
-| 23 | 12 V supply | 1 | 12 V 2 A | Arduino VIN + fans |
-| 24 | 5 V supply | 1 | see item 13 | mist heads |
+| 23 | 12 V supply | 1 | **12 V ≥ 3 A** | Arduino VIN + fans + step-down for the mist heads (~1 A at 12 V) |
+| 24 | 5 V supply | 1 | see item 13 | mist heads, switched by the DC/DC SSR (item 7) |
 | 25 | Mains protection | 1 | RCD/RCBO 30 mA, 2 A fuse for electronics, fuse sized to heater | **mains wiring by a qualified person** |
 
 ## F. Chamber

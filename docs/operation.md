@@ -108,11 +108,11 @@ The default gains come from simulation (see [control-design.md §7](control-desi
 | T oscillates (period minutes), heater swings 0↔100 % | lower `T_KP` (e.g. 15 → 10) and/or `T_KI` |
 | T settles slowly, stays offset | raise `T_KI` (e.g. 0.03 → 0.05) |
 | T overshoots after the lid is opened | raise `T_KD` (180 → 250), or improve heater-to-air coupling (thin Al wall) |
-| RH oscillates, mist heads and blower alternate | lower `RH_KP` (5 → 3) and `RH_KI` (0.01 → 0.006) |
+| RH oscillates, mist heads and blower alternate | lower `RH_KP` (3 → 2) and `RH_KI` (0.006 → 0.004) |
 | RH sits 1–2 % below set-point for long | raise `RH_KI` slightly |
 | Blower pulses too short to spin up | raise `VENT_MIN_ON_MS` |
-| Mist heads switched by an SSR on the 230 V side of their USB adapter | set `MIST_SWITCH_SSR 1` (longer bursts: expect more RH ripple with strong mist) |
-| RH ripples with each mist burst | use the MOSFET mist switch, a bigger box, or fewer heads; lower `RH_KP` |
+| Mist heads switched on the 230 V side of a USB adapter (instead of the DC/DC SSR) | set `MIST_AC_SIDE_SWITCH 1` (longer bursts: expect more RH ripple with strong mist) |
+| RH ripples with each mist burst | switch the mist on the DC side (DC/DC SSR or MOSFET), use a bigger box or fewer heads; lower `RH_KP` |
 | RH ripple follows T ripple | improve T first: add thermal mass and insulation (1 °C ≈ 4.3 %RH at 35 °C / 80 %RH) |
 
 Change one parameter at a time and re-upload. Settings in EEPROM (set-points, log interval) are kept.
@@ -132,7 +132,7 @@ Put the DHT22 in a sealed jar above a **saturated NaCl slurry**, which is 75.3 %
 |---|---|
 | `!SENSOR FAIL` | DHT22 wiring, pull-up, cable length; condensation on the sensor |
 | T does not reach the set-point | set-point less than 3 °C above room temperature? heater power, insulation, thermal fuse |
-| RH does not reach the set-point | salt-solution level, mist heads start without a button press, crusted heads (rinse with DI water), blower stuck on, box leaking |
+| RH does not reach the set-point | voltage at the mist drivers ≥ 4.75 V while all 4 run (DC SSR drop), salt-solution level, mist heads start without a button press, crusted heads (rinse with DI water), blower stuck on, box leaking |
 | RH cannot be lowered | room air is too humid. The fresh-air blower can only bring RH down to the room's moisture content |
 | LCD blank | contrast pot on the shield; I²C address conflicts |
 | `SD not found` | FAT32 card inserted before power-up; CS = D10 |

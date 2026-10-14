@@ -7,7 +7,7 @@ mkdir -p build
 CXX=${CXX:-g++}
 $CXX -std=c++17 -O2 -Istubs -x c++ ui_test.cpp      -o build/ui_test
 $CXX -std=c++17 -O2 -Istubs -x c++ chamber_sim.cpp  -o build/chamber_sim
-$CXX -std=c++17 -O2 -Istubs -DMIST_SWITCH_SSR=1 -x c++ chamber_sim.cpp -o build/chamber_sim_ssr
+$CXX -std=c++17 -O2 -Istubs -DMIST_AC_SIDE_SWITCH=1 -x c++ chamber_sim.cpp -o build/chamber_sim_ac
 
 echo "== UI test"
 ./build/ui_test
@@ -16,10 +16,10 @@ fail=0
 while read -r name vars; do
   [ -z "$name" ] && continue
   echo "== $name ($vars)"
-  # "ssr" in the name: firmware built for mist heads switched by an SSR on the
-  # 230 V side of their USB adapter (MIST_SWITCH_SSR 1, adapter start-up 0.5 s)
+  # "ac_side" in the name: firmware built for mist heads switched on the 230 V
+  # side of their USB adapter (MIST_AC_SIDE_SWITCH 1, adapter start-up 0.5 s)
   bin=./build/chamber_sim
-  if [[ $name == *ssr* ]]; then bin=./build/chamber_sim_ssr; vars="MD=0.5 $vars"; fi
+  if [[ $name == *ac_side* ]]; then bin=./build/chamber_sim_ac; vars="MD=0.5 $vars"; fi
   if [[ $name == info:* ]]; then
     env $vars $bin || echo "(informational - not counted)"
   else
@@ -38,8 +38,8 @@ low_thermal_mass                 CAP=1000 UA=1.5
 tiny_box                         CAP=500 CW=400 HR=1.2 TAU=25 UA=2
 large_thermal_mass               CAP=6000 CW=1500 PW=150
 small_heater                     PW=50
-ssr_mist_moderate                HR=0.5
-info:ssr_mist_strong             T1=ROOM H1=75 T2=ROOM H2=40 HR=1.0 TAU=15 RA=0.3
+ac_side_mist_moderate                HR=0.5
+info:ac_side_mist_strong             T1=ROOM H1=75 T2=ROOM H2=40 HR=1.0 TAU=15 RA=0.3
 info:thick_wall_slow_heater      CW=2000 GW=2
 SCENARIOS
 exit $fail

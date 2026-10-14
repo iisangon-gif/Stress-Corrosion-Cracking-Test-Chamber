@@ -21,8 +21,9 @@
 //  D10..D13        : SD card (SPI) on the Data Logging Shield
 // ---------------------------------------------------------------------
 #define PIN_DHT           2   // DHT22 data (pull-up to 5V, built into AM2302)
-#define PIN_MIST          3   // SSR on the 230 V input of the 5 V USB adapter feeding the
-                              // 4 ultrasonic mist heads (or a MOSFET on the 5 V side)
+#define PIN_MIST          3   // DC-DC SSR input -> 5 V supply of the 4 mist-head drivers
+                              // (SSR in the 12 V feed of the 12->5 V step-down, or in the
+                              // + line of a separate 5 V supply; a MOSFET also works)
 #define PIN_HEATER        5   // SSR / MOSFET -> heater (outside the salt fog)
 #define PIN_VENT          6   // SSR / MOSFET -> fresh-air blower (outside the salt fog)
 #define PIN_CIRC_FAN      7   // SSR / MOSFET -> circulation fan (optional, IP68)
@@ -82,12 +83,14 @@
 #define HEATER_MIN_ON_MS   20UL
 // Mist heads are sprayed in short timed bursts (not fast PWM). Short bursts
 // matter: 4 heads in a 40-60 L box add ~1 %RH per 0.5 s of mist.
-//   MIST_SWITCH_SSR 0: MOSFET on the 5 V side         -> 0.3 s bursts (recommended)
-//   MIST_SWITCH_SSR 1: SSR on the 230 V adapter input -> >= 1 s bursts (adapter start-up)
-#ifndef MIST_SWITCH_SSR
-#define MIST_SWITCH_SSR     0
+//   MIST_AC_SIDE_SWITCH 0: fast DC switch - DC-DC SSR or MOSFET in the 12 V / 5 V
+//                          feed of the drivers                  -> 0.3 s bursts
+//   MIST_AC_SIDE_SWITCH 1: SSR on the 230 V input of a USB adapter -> >= 1 s bursts
+//                          (the adapter needs ~0.5 s to start)
+#ifndef MIST_AC_SIDE_SWITCH
+#define MIST_AC_SIDE_SWITCH 0
 #endif
-#if MIST_SWITCH_SSR
+#if MIST_AC_SIDE_SWITCH
   #define MIST_WINDOW_MS  6000UL
   #define MIST_MIN_ON_MS  1000UL
 #else

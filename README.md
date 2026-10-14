@@ -40,7 +40,7 @@ Arduino UNO R3 controller for a small **stress corrosion cracking (SCC) test cha
 * **Temperature:** PID → silicone heater pad on the outside wall, switched by an SSR-25DA (2 s time-proportioning).
 * **Operating range:** **20–40 °C or ROOM** (no heating), **20–80 %RH**, with humidity controlled mainly by the mist. There is no cooler, and RH below the room air's moisture needs a silica-gel inlet.
 * **Humidity / fog:** one split-range PI. Positive output → the 4 mist heads (own drivers, switched together on one 5 V rail) sprayed in **timed bursts** of ≥ 0.3 s. Negative output → fresh-air blower.
-* **All outputs are on/off** (time-proportioned), so MOSFET modules or SSRs both work.
+* **All outputs are on/off** (time-proportioned): SSR-25DA for the 230 V heater (D5), and a DC/DC SSR for the mist-head supply (D3, in the 12 V feed of the 12→5 V step-down). MOSFET modules also work.
 * **Input / display:** set T and RH with the keypad (or serial), saved in EEPROM. The backlight turns **green** when stable in tolerance and **red** on alarm.
 * **Recording:** CSV to microSD (one file per day, RTC time stamps) and to USB serial.
 * **Safety:** sensor-fail and over-temperature cut-outs, an out-of-band alarm, an 8 s watchdog, and a 72 °C thermal fuse.

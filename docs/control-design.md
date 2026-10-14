@@ -26,7 +26,7 @@ flowchart LR
     HTR[Silicone heater pad<br/>on outer wall] -. heat through wall .-> Chamber
     FA[Fresh-air blower<br/>outside] -. room air in .-> Chamber
     DHT -- data D2 --> UNO
-    UNO[Arduino UNO R3] -- D3 --> M1[MOSFET] -- 5 V --> MIST
+    UNO[Arduino UNO R3] -- D3 --> M1[DC/DC SSR<br/>in 12 V feed] --> BK[12→5 V step-down] -- 5 V --> MIST
     UNO -- D5 --> S1[SSR-25DA] -- 230 VAC --> HTR
     UNO -- D6 --> M2[MOSFET / SSR-DD] --> FA
     UNO -- D7 --> M3[MOSFET / SSR-DD] --> CF
@@ -39,7 +39,7 @@ flowchart LR
 | Actuator | Effect | Control signal |
 |---|---|---|
 | Silicone heater pad (230 VAC, 100–150 W) on the outer wall | raises T (and lowers RH) | D5 → SSR-25DA, time-proportioned in a 2 s window |
-| 4 × ultrasonic mist heads (5 V USB, own drivers, all together) | adds salt fog, raises RH | D3 → MOSFET on the 5 V rail: timed bursts in a 4 s window, ≥ 0.3 s each (or SSR on the adapter's 230 V input: 6 s window, ≥ 1 s) |
+| 4 × ultrasonic mist heads (5 V USB, own drivers, all together) | adds salt fog, raises RH | D3 → DC/DC SSR in the 12 V feed of the 12→5 V step-down (or in the + line of a separate 5 V supply): timed bursts in a 4 s window, ≥ 0.3 s each (or SSR on the adapter's 230 V input: 6 s window, ≥ 1 s) |
 | Fresh-air blower outside + passive outlet | lowers RH (and T) by blowing drier room air in | D6, time-proportioned in a 10 s window |
 | Circulation fan (optional, IP68) | mixes the air | D7, on while running |
 | Alarm (buzzer or lighted button) | tells the operator | D8, blinks 0.4 s every 1.2 s |
@@ -82,8 +82,8 @@ One continuous PI drives both actuators, so the mist heads and the blower never 
 
 | Mist switch | Shortest burst | Worst RH deviation |
 |---|---|---|
-| MOSFET on the 5 V rail (`MIST_SWITCH_SSR 0`, default) | 0.3 s | ±1.3 %RH ✅ |
-| SSR on the 230 V input of the USB adapter (`MIST_SWITCH_SSR 1`) | 1 s (adapter start-up ~0.5 s) | ±2.2 %RH ❌; passes with moderate mist (bigger box / fewer heads) |
+| DC/DC SSR (12 V or 5 V side) or MOSFET (`MIST_AC_SIDE_SWITCH 0`, default) | 0.3 s | ±1.3 %RH ✅ |
+| SSR on the 230 V input of a USB adapter (`MIST_AC_SIDE_SWITCH 1`) | 1 s (adapter start-up ~0.5 s) | ±2.2 %RH ❌; passes with moderate mist (bigger box / fewer heads) |
 
 ### 3.3 Operating range and its physical limits
 
@@ -142,7 +142,7 @@ The 8-hour scenario: room conditions → **set-point 1** → step to **set-point
 
 ![Simulated response](img/simulated-response.png)
 
-Default room 25 °C / 60 %RH, 4 mist heads ≈ 0.7 g/m³s (40–60 L box), MOSFET mist switch, set-points 35 °C / 70 % then 40 °C / 40 %, unless stated.
+Default room 25 °C / 60 %RH, 4 mist heads ≈ 0.7 g/m³s (40–60 L box), fast DC mist switch (DC/DC SSR or MOSFET), set-points 35 °C / 70 % then 40 °C / 40 %, unless stated.
 
 | Chamber variant | set-point 1 steady | set-point 2 steady | 15 min after lid opening → end |
 |---|---|---|---|
@@ -158,8 +158,8 @@ Default room 25 °C / 60 %RH, 4 mist heads ≈ 0.7 g/m³s (40–60 L box), MOSFE
 | tiny box, very strong mist | ±0.02 °C, ±0.94 %RH | ±0.11 °C, ±0.48 %RH | ±0.12 °C, ±0.45 %RH |
 | large thermal mass, 150 W | ±0.08 °C, ±0.55 %RH | ±0.08 °C, ±0.33 %RH | ±0.78 °C, ±0.46 %RH |
 | small heater 50 W | ±0.04 °C, ±0.50 %RH | ±0.02 °C, ±0.27 %RH | ±0.43 °C, ±0.35 %RH |
-| SSR mist switch, moderate mist | ±0.07 °C, ±0.88 %RH | ±0.06 °C, ±0.50 %RH | ±0.46 °C, ±0.79 %RH |
-| *SSR mist switch, strong mist, ROOM (informational)* | –, **±2.24 %RH** | –, ±1.69 %RH | –, **±2.06 %RH** |
+| 230 V-side mist switch, moderate mist | ±0.07 °C, ±0.88 %RH | ±0.06 °C, ±0.50 %RH | ±0.46 °C, ±0.79 %RH |
+| *230 V-side mist switch, strong mist, ROOM (informational)* | –, **±2.24 %RH** | –, ±1.69 %RH | –, **±2.06 %RH** |
 | *thick plastic wall 2 kJ/K @ 2 W/K (informational)* | ±0.38 °C, ±0.55 %RH | ±0.53 °C, ±0.36 %RH | **±1.22 °C**, ±0.46 %RH |
 
 All variants except the two informational cases stayed **100 % within ±1 °C / ±2 %RH**. The model is well mixed, so a real chamber will show more ripple. Confirm on the hardware ([operation.md §5](operation.md#5-tuning-on-the-real-chamber)).
@@ -170,7 +170,7 @@ All variants except the two informational cases stayed **100 % within ±1 °C / 
 |---|---|
 | DHT22 read + both control loops | 2 s |
 | Heater time-proportioning | 2 s window, min ON 20 ms |
-| Mist heads (timed bursts) | 4 s window, min burst 0.3 s, carry-over (SSR option: 6 s / 1 s) |
+| Mist heads (timed bursts) | 4 s window, min burst 0.3 s, carry-over (230 V-side option: 6 s / 1 s) |
 | Fresh-air blower time-proportioning | 10 s window, min ON 1.5 s |
 | Keypad poll / LCD refresh | 50 ms / 500 ms |
 | Log record (SD + serial) | 60 s default (1–3600 s) |
