@@ -4,43 +4,46 @@
 
 | Item | Requirement | How it is met |
 |---|---|---|
-| Controller | Arduino UNO R3 | ATmega328P. The sketch uses 32,008 of 32,256 bytes of flash and 1,454 of 2,048 bytes of static RAM |
-| Humidity source | 1 × small USB ultrasonic humidifier | Switched by a MOSFET with slow time-proportioning |
+| Controller | Arduino UNO R3 | ATmega328P. The sketch uses 31,870 of 32,256 bytes of flash and 1,480 of 2,048 bytes of static RAM |
+| Environment | salt fog of 3.5 wt% NaCl (ASTM conformance not required) | 4 USB ultrasonic mist heads in the salt solution, switched together |
 | Sensor | 1 × DHT | **DHT22 / AM2302** (see §5) |
-| Set-points | Target %RH and °C | Set from the LCD keypad or USB serial, saved in EEPROM |
-| Tolerance | ±2 %RH, ±1 °C | PID / split-range PI. Simulated worst case over 11 chamber variants: ±1.4 %RH, ±0.54 °C |
+| Set-points | target %RH and °C | from the LCD keypad or USB serial, saved in EEPROM |
+| Tolerance | ±2 %RH, ±1 °C | PID / split-range PI. Simulated worst case over 11 chamber variants: ±0.77 °C, ±1.47 %RH |
 | Display / input | 16×2 I²C LCD shield with buttons | Adafruit RGB LCD Shield (MCP23017, 5 keys, uses A4/A5 only) |
 | Recording | T and RH logged | CSV on microSD (RTC time stamps) and CSV on USB serial |
+| Corrosion | heater and fans must survive the salt fog | heater pad and fresh-air blower are mounted **outside** the fog ([design-notes-th.md §2.4](design-notes-th.md)) |
 
 ## 2. Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Chamber["Insulated chamber (20–40 L)"]
+    subgraph Chamber["Salt-fog chamber 20–60 L"]
         DHT[DHT22<br/>T / RH]
-        HUM[USB ultrasonic<br/>humidifier]
-        HTR[12 V PTC heater]
-        CF[Circulation fan]
-        EF[Exhaust fan]
+        MIST[4 × ultrasonic mist heads<br/>in 3.5 % NaCl]
+        CF[Circulation fan<br/>IP68, optional]
     end
+    HTR[Silicone heater pad<br/>on outer wall] -. heat through wall .-> Chamber
+    FA[Fresh-air blower<br/>outside] -. room air in .-> Chamber
     DHT -- data D2 --> UNO
-    UNO[Arduino UNO R3] -- D3 on/off --> M1[MOSFET] --> HUM
-    UNO -- D5 PWM --> M2[MOSFET] --> HTR
-    UNO -- D6 PWM --> M3[MOSFET] --> EF
-    UNO -- D7 on/off --> M4[MOSFET] --> CF
+    UNO[Arduino UNO R3] -- D3 --> M1[MOSFET] -- 5 V --> MIST
+    UNO -- D5 --> S1[SSR-25DA] -- 230 VAC --> HTR
+    UNO -- D6 --> M2[MOSFET / SSR-DD] --> FA
+    UNO -- D7 --> M3[MOSFET / SSR-DD] --> CF
+    UNO -- D8 --> AL[Buzzer or lighted button]
     UNO <-- I2C --> LCD[RGB LCD shield<br/>16x2 + 5 keys]
     UNO <-- I2C / SPI --> LOG[Data-logging shield<br/>RTC + microSD]
     UNO <-- USB --> PC[PC: serial_logger.py]
 ```
 
-Actuators and what each one does:
-
 | Actuator | Effect | Control signal |
 |---|---|---|
-| PTC heater (12 V, ~50 W) | raises T (and lowers RH) | PWM 0–100 % on D5 (980 Hz) |
-| USB ultrasonic humidifier (5 V, ~2 W) | raises RH | time-proportioned on/off on D3, 5 s window |
-| Exhaust fan + passive inlet | lowers RH (and T) by drawing in drier room air | PWM on D6, 30–100 % speed |
-| Circulation fan | mixes the air so the sensor reads the whole chamber, spreads heater output | on while running |
+| Silicone heater pad (230 VAC, 100–150 W) on the outer wall | raises T (and lowers RH) | D5 → SSR-25DA, time-proportioned in a 2 s window |
+| 4 × ultrasonic mist heads (5 V USB, all together) | adds salt fog, raises RH | D3 → MOSFET, time-proportioned in a 5 s window |
+| Fresh-air blower outside + passive outlet | lowers RH (and T) by blowing drier room air in | D6, time-proportioned in a 10 s window |
+| Circulation fan (optional, IP68) | mixes the air | D7, on while running |
+| Alarm (buzzer or lighted button) | tells the operator | D8, blinks 0.4 s every 1.2 s |
+
+**Every output is on/off.** Each output's demand of *x* % becomes ON for *x* % of a fixed window. This works with MOSFET modules, DC SSRs and zero-cross AC SSRs alike; fast PWM would not work with an AC SSR. On-times shorter than the minimum (e.g. 0.5 s for the mist heads) are carried over to the next window, so the average is still exact.
 
 The system has no cooler. The temperature set-point must be at least ~3 °C above room temperature. RH can only be lowered to the room's absolute humidity at chamber temperature.
 
@@ -52,114 +55,103 @@ The DHT22 is read every **2 s**, which is its maximum rate. Both loops run at th
 
 ```
 e      = T_set − T
-P      = T_KP · e                         T_KP = 20  %/°C
-I     += T_KI · e · dt  (clamped 0..100)  T_KI = 0.05 %/(°C·s)
-D      = −T_KD · dT/dt  (on measurement)  T_KD = 60  %/(°C/s)
-heater = clamp(P + I + D, 0, 100) %      → analogWrite(D5)
+P      = T_KP · e                         T_KP = 15   %/°C
+I     += T_KI · e · dt  (only |e| ≤ 1.5)  T_KI = 0.03 %/(°C·s)
+D      = −T_KD · dT/dt  (on measurement)  T_KD = 180  %/(°C/s)
+heater = clamp(P + I + D, 0, 100) %      → 2 s time-proportioning on D5
 ```
 
-* Anti-windup: the integral only accumulates while |e| ≤ 1.5 °C (`T_IZONE`) and while the output is not saturated in the same direction. This prevents overshoot after heat-up or after the lid has been opened.
-* The derivative is taken on the measurement, not on the error, so set-point steps do not cause output kicks.
-* If T rises 0.7 °C above the set-point while the heater is already at 0 %, the exhaust fan is forced to at least 50 % until T falls back below set-point + 0.2 °C.
+* **Anti-windup.** The integral only runs while |e| ≤ 1.5 °C (`T_IZONE`) and while the output is not saturated in the same direction. This prevents overshoot after heat-up or after the lid has been opened.
+* **Strong derivative.** The heater pad heats the wall first and the air later, so the loop has extra lag. The derivative term brakes the heater before the stored wall heat overshoots.
+* **Heat-venting is a last resort.** Only if T is more than 1.5 °C above set-point with the heater already off is the fresh-air blower forced to at least 50 %. Venting also dries the fog, so the threshold sits outside the ±1 °C band.
 
-### 3.2 Humidity → humidifier / exhaust fan (split-range PI)
-
-A single PI controller has output `u` from −100 to +100 %:
+### 3.2 Humidity → mist heads / fresh-air blower (split-range PI)
 
 ```
 e = RH_set − RH
 u = RH_KP · e + I            RH_KP = 5 %/%RH,  RH_KI = 0.01 %/(%RH·s),  integral zone ±5 %RH
 
-u > 0  → humidifier duty = u
-u < 0  → exhaust fan     = −u   (mapped to 30..100 % PWM so the fan always spins)
+u > 0  → mist heads       = u    (5 s window, min ON 0.5 s)
+u < 0  → fresh-air blower = −u   (10 s window, min ON 1.5 s)
 ```
 
-Why split-range rather than an on/off exhaust fan: at full speed the exhaust removes moisture about as fast as the humidifier adds it. Switching it on and off would inject large steps into a loop whose sensor lags 10–20 s, which invites a limit cycle. With one continuous PI driving both actuators, the humidifier and the exhaust never run at the same time, and the hand-over between them is smooth.
-
-**Humidifier time-proportioning.** The USB module has its own oscillator board. It cannot be PWM'd at kHz rates and needs about 0.3–0.5 s to start misting. It is therefore switched in a 5 s window: `on-time = u% × 5 s`. A requested on-time shorter than 0.5 s is not dropped. It is carried into the next window (sigma-delta style), so the average duty is still exact. At low demand this gives occasional short bursts.
+One continuous PI drives both actuators, so the mist heads and the blower never run together, and the hand-over between them is smooth. In practice the chamber loses moisture through leaks and the passive outlet, so the blower is rarely needed. The simulation never used it in steady state.
 
 ### 3.3 Coupling between T and RH
 
-RH depends strongly on temperature. At 35 °C / 80 %RH, a **1 °C change in air temperature changes RH by about 4.3 %RH** at constant moisture content. **Holding ±2 %RH in practice requires holding temperature to about ±0.3 °C (≈ ±1.3 %RH), leaving margin for sensor noise and humidifier ripple.** That is why the temperature loop is tuned tighter than the ±1 °C specification, and why chamber construction matters (§6).
+At 35 °C / 80 %RH, **a 1 °C change in air temperature changes RH by about 4.3 %RH** at constant moisture content. Holding ±2 %RH therefore needs temperature held to about ±0.3 °C. That is why the temperature loop is tuned tighter than ±1 °C, and why the heater-to-air coupling matters (§6).
 
 ## 4. Supervisory logic and safety
 
 | Condition | Action |
 |---|---|
-| DHT22 fails 3 reads in a row (6 s) | heater, humidifier and exhaust off; LCD red "!SENSOR FAIL"; buzzer |
-| T ≥ 60 °C (`T_ABS_MAX`) | heater off, exhaust 100 %, humidifier off, alarm |
-| Optional float switch reports the tank empty | humidifier off, alarm (protects the transducer from running dry) |
-| Out of tolerance > 10 min after having been stable | "!OUT OF BAND" alarm (beep), logged |
-| Any key press | silences the buzzer for the current alarms |
-| Program hang | 8 s hardware watchdog resets the board. All outputs start OFF, and the settings are restored from EEPROM |
-| Independent of software | **72 °C thermal fuse in series with the heater** (hardware) |
+| DHT22 fails 3 reads in a row (6 s) | heater, mist heads and blower off; LCD red "!SENSOR FAIL"; alarm output blinks |
+| T ≥ 60 °C (`T_ABS_MAX`) | heater and mist off, blower 100 %, alarm |
+| Out of tolerance > 10 min after having been stable (e.g. salt solution ran out, lid left open, heater failed) | "!OUT OF BAND" alarm, logged |
+| Any key press | acknowledges the current alarms (the output stops blinking) |
+| Program hang | 8 s hardware watchdog. All outputs start OFF and the settings are restored from EEPROM |
+| Independent of software | **72 °C thermal fuse on the heater pad** |
 
-**Stability statistics.** Once T and RH have both stayed in tolerance for 5 minutes, the controller marks the chamber **stable** and the backlight turns green. From then on it counts the fraction of samples in tolerance and the maximum |ΔT| and |ΔRH|. These are shown on the LCD Stats screen and returned by `STATUS`. Changing a set-point resets the statistics.
+**Removed to fit the UNO:** the salt-solution low-level switch and the door switch. Check the solution level by eye, and press STOP before opening the lid. See [design-notes-th.md §1](design-notes-th.md).
+
+**Stability statistics.** Once T and RH have stayed in tolerance for 5 minutes, the chamber is marked **stable** and the backlight turns green. From then on the controller counts the in-tolerance fraction and the maximum |ΔT| and |ΔRH|.
 
 ## 5. Sensor choice: DHT22 (AM2302)
 
 | | DHT11 | **DHT22 / AM2302** |
 |---|---|---|
-| RH range | 20–80 % | **0–100 %** |
-| RH accuracy | ±5 % | **±2 % typ.** (±5 % max) |
+| RH range / accuracy | 20–80 %, ±5 % | **0–100 %, ±2 % typ.** |
 | T accuracy | ±2 °C | **±0.5 °C** |
 | Resolution | 1 %RH / 1 °C | **0.1 %RH / 0.1 °C** |
-| Sampling | 1 Hz | 0.5 Hz |
 
-The DHT11 cannot meet the specification: its 1 % / 1 °C resolution alone is half the tolerance band. **The DHT22 is the only DHT model suitable.** Use the **AM2302 wired version**, which has a pull-up resistor and a cable. It lets the sensor sit in the chamber while the electronics stay outside.
-
-Control stability and accuracy are different things. The controller holds the *reading* within ±2 %RH, but the DHT22 itself may be offset by about 2 %RH. For traceable results:
-
-* Check the sensor against **saturated salt solutions** in a sealed jar at 25 °C: NaCl → 75.3 %RH, Mg(NO₃)₂ → 52.9 %RH, MgCl₂ → 32.8 %RH. Enter any offsets as `T_OFFSET` / `RH_OFFSET` in `config.h`.
-* Or log it next to a calibrated reference hygrometer for 24 h.
-* Above ~90 %RH, DHT22s drift and recover slowly. For long tests at ≥ 90 %RH, consider an SHT31/SHT35, which is a drop-in on I²C but needs a library change.
+The DHT11 cannot meet ±1 °C / ±2 %RH. In salt fog the DHT22 needs a filter cap and conformal coating, and must be kept out of the direct mist. Treat it as a consumable and check it periodically. A saturated NaCl jar gives 75.3 %RH at 25 °C, and offsets go in `config.h` as `T_OFFSET` / `RH_OFFSET`.
 
 ## 6. Achieving the tolerance: chamber guidelines
 
-The simulation (§7) shows the controller holds the specification across a wide range of chambers. In practice the main risks are physical:
-
-1. **Insulate the chamber.** An EPS/PU cooler box or an acrylic box wrapped in foam works well. Keep heat loss below ~1.5 W/K.
-2. **Add thermal mass.** A sealed 0.5–1 L water bottle or an aluminium block in the chamber damps temperature ripple.
-3. **Always circulate.** Run the circulation fan blowing across the heater and through the chamber. Mount the DHT22 in the airflow but **out of the direct mist plume**, and never let water droplets land on the sensor.
-4. **Use a passive inlet** of a few cm² opposite the exhaust fan, so venting draws in room air rather than creating a vacuum.
-5. **Size the humidifier to the box.** A typical USB module (20–40 mL/h) is plenty for 20–40 L. For smaller boxes, reduce `RH_KP`.
-6. **Use distilled water** in the humidifier. Tap water leaves white mineral dust on specimens.
-7. **Keep the set-point at least 3 °C above room temperature**, because there is no cooling.
+1. **Couple the heater well to the air.** Bond the pad to a **thin aluminium wall/floor (2–3 mm) coated on the fog side**, not to thick plastic. In simulation, a heavy, poorly conducting wall (2 kJ/K, 2 W/K) still held the steady state, but overshot to 1.26 °C for several minutes after the lid was opened.
+2. **Insulate** the outside, covering the heater pad too.
+3. **Keep the mist plume off the sensor** with a baffle. Never let droplets land on the DHT22.
+4. **Fresh air in, fog out.** The blower outside pushes room air in, and a passive outlet with a water trap lets fog out.
+5. **Keep the set-point at least 3 °C above room temperature**, because there is no cooling.
 
 ## 7. Verification by simulation
 
-The unmodified firmware source was compiled on a PC against stubbed Arduino I/O and run in closed loop at the real 2 s control period. The code is in [`test/sim/`](../test/sim/); run `test/sim/run.sh`, which CI also runs on every push. The lumped chamber model included:
+The unmodified firmware was compiled on a PC against stubbed Arduino I/O and run in closed loop at the real 2 s control period. The code is in [`test/sim/`](../test/sim/); run `test/sim/run.sh`, which CI also runs on every push. The model includes:
 
-* heat balance: heater power, wall loss and fan venting
-* moisture balance (absolute humidity): humidifier input, leakage and fan venting
-* Magnus saturation curve
+* a heater pad heating a wall node, which heats the air
+* air heat loss and blower venting
+* moisture balance with mist input, leakage and venting
+* Magnus saturation
 * first-order DHT22 lag and 0.1-unit quantisation
 
-The 8-hour scenario: start-up from 25 °C / 60 %RH to **35 °C / 80 %RH** → step to **40 °C / 70 %RH** at 4 h → **lid opened for 60 s** at 6 h.
+The 8-hour scenario: 25 °C / 60 %RH → **35 °C / 80 %RH** → step to **40 °C / 70 %RH** at 4 h → **lid opened for 60 s** at 6 h.
 
 ![Simulated response](img/simulated-response.png)
 
-Gains were chosen by sweeping them over 11 chamber variants, ranging from weak to 3× stronger humidifiers, 5–30 s sensor lag, 0.5–6 kJ/K thermal mass, 50–100 W heaters, and 20–30 °C rooms. The final gains are the set that stayed in tolerance for all of them:
-
 | Chamber variant | 35 °C / 80 % steady | 40 °C / 70 % steady | 15 min after lid opening → end |
 |---|---|---|---|
-| nominal: 3 kJ/K, 50 W, 0.3 g/m³s humidifier, sensor τ 10 s | ±0.00 °C, ±0.64 %RH | ±0.00 °C, ±0.32 %RH | ±0.39 °C, ±0.37 %RH |
-| 2× humidifier, sensor τ 20 s | ±0.00 °C, ±0.94 %RH | ±0.00 °C, ±0.61 %RH | ±0.40 °C, ±0.69 %RH |
-| 3× humidifier, sensor τ 30 s | ±0.00 °C, ±1.41 %RH | ±0.00 °C, ±1.04 %RH | ±0.41 °C, ±1.14 %RH |
-| low thermal mass 1 kJ/K, poor insulation | ±0.01 °C, ±0.63 %RH | ±0.01 °C, ±0.32 %RH | ±0.09 °C, ±0.58 %RH |
-| tiny box 0.5 kJ/K, 100 W, strong humidifier, τ 25 s | ±0.02 °C, ±1.11 %RH | ±0.03 °C, ±0.85 %RH | ±0.03 °C, ±0.99 %RH |
-| cold, dry room (20 °C, 40 %RH) | ±0.00 °C, ±0.45 %RH | ±0.00 °C, ±0.36 %RH | ±0.39 °C, ±0.44 %RH |
-| warm, humid room (30 °C, 75 %RH) | ±0.00 °C, ±0.46 %RH | ±0.00 °C, ±0.34 %RH | ±0.40 °C, ±0.44 %RH |
+| nominal: air 3 kJ/K, wall 0.8 kJ/K @ 4 W/K, 100 W pad, mist 0.3 g/m³s, sensor τ 10 s | ±0.07 °C, ±0.69 %RH | ±0.06 °C, ±0.30 %RH | ±0.46 °C, ±0.59 %RH |
+| 2× mist, sensor τ 20 s | ±0.08 °C, ±0.93 %RH | ±0.06 °C, ±0.62 %RH | ±0.51 °C, ±0.65 %RH |
+| 3× mist, sensor τ 30 s | ±0.08 °C, ±1.47 %RH | ±0.07 °C, ±1.06 %RH | ±0.55 °C, ±1.15 %RH |
+| ½× mist, sensor τ 5 s | ±0.06 °C, ±0.33 %RH | ±0.06 °C, ±0.27 %RH | ±0.45 °C, ±0.78 %RH |
+| low thermal mass, poor insulation | ±0.06 °C, ±0.64 %RH | ±0.05 °C, ±0.31 %RH | ±0.39 °C, ±0.47 %RH |
+| tiny box, strong mist, τ 25 s | ±0.02 °C, ±1.13 %RH | ±0.11 °C, ±0.89 %RH | ±0.12 °C, ±0.91 %RH |
+| large thermal mass, 150 W | ±0.07 °C, ±0.65 %RH | ±0.08 °C, ±0.30 %RH | ±0.77 °C, ±0.44 %RH |
+| small heater 50 W | ±0.04 °C, ±0.65 %RH | ±0.02 °C, ±0.33 %RH | ±0.43 °C, ±0.39 %RH |
+| cold, dry room (20 °C, 40 %RH) | ±0.06 °C, ±0.44 %RH | ±0.07 °C, ±0.39 %RH | ±0.49 °C, ±0.71 %RH |
+| warm, humid room (30 °C, 75 %RH) | ±0.07 °C, ±0.45 %RH | ±0.06 °C, ±0.38 %RH | ±0.51 °C, ±0.52 %RH |
+| *thick plastic wall 2 kJ/K @ 2 W/K (informational)* | ±0.38 °C, ±0.67 %RH | ±0.51 °C, ±0.45 %RH | **±1.26 °C**, ±0.53 %RH (90.7 % in band) |
 
-Every variant was **100 % within ±1 °C / ±2 %RH** once settled. The model is well mixed and has no air stratification, so a real chamber will show more ripple than the table. Treat these as controller-design results and confirm on the hardware with the procedure in [operation.md §5](operation.md#5-tuning-on-the-real-chamber).
+All variants except the informational thick-wall case stayed **100 % within ±1 °C / ±2 %RH**. The model is well mixed, so a real chamber will show more ripple. Confirm on the hardware ([operation.md §5](operation.md#5-tuning-on-the-real-chamber)).
 
 ## 8. Timing summary
 
 | Task | Period |
 |---|---|
 | DHT22 read + both control loops | 2 s |
-| Humidifier time-proportioning window | 5 s (min pulse 0.5 s, carry-over) |
-| Keypad poll | 50 ms (auto-repeat 150 ms, ×10 after 2 s hold) |
-| LCD refresh | 500 ms |
+| Heater time-proportioning | 2 s window, min ON 20 ms |
+| Mist heads time-proportioning | 5 s window, min ON 0.5 s (carry-over) |
+| Fresh-air blower time-proportioning | 10 s window, min ON 1.5 s |
+| Keypad poll / LCD refresh | 50 ms / 500 ms |
 | Log record (SD + serial) | 60 s default (1–3600 s) |
 | Watchdog | 8 s |

@@ -33,8 +33,8 @@ def load(path):
                     "time": parse_time(r, i),
                     "t": float(r["t_C"]), "rh": float(r["rh_pct"]),
                     "t_set": float(r["t_set_C"]), "rh_set": float(r["rh_set_pct"]),
-                    "heater": float(r["heater_pct"]), "humid": float(r["humid_pct"]),
-                    "exhaust": float(r["exhaust_pct"]), "stable": r.get("stable", "0") == "1",
+                    "heater": float(r["heater_pct"]), "mist": float(r["mist_pct"]),
+                    "vent": float(r["vent_pct"]), "stable": r.get("stable", "0") == "1",
                 })
             except (KeyError, ValueError):
                 continue        # skip NA rows (sensor failure) and stray lines
@@ -73,8 +73,8 @@ def plot(rows, t_tol, rh_tol, png):
     ax1.set_title("SCC chamber: temperature and humidity")
 
     ax3.plot(x, [r["heater"] for r in rows], lw=1, label="heater %")
-    ax3.plot(x, [r["humid"] for r in rows], lw=1, label="humidifier %")
-    ax3.plot(x, [r["exhaust"] for r in rows], lw=1, label="exhaust %")
+    ax3.plot(x, [r["mist"] for r in rows], lw=1, label="mist heads %")
+    ax3.plot(x, [r["vent"] for r in rows], lw=1, label="fresh-air vent %")
     ax3.set_ylabel("output %")
     ax3.set_ylim(-5, 105)
     ax3.grid(alpha=0.3)

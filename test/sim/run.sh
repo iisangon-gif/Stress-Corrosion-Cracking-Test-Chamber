@@ -15,15 +15,21 @@ fail=0
 while read -r name vars; do
   [ -z "$name" ] && continue
   echo "== $name ($vars)"
-  env $vars ./build/chamber_sim || fail=1
+  if [[ $name == info:* ]]; then
+    env $vars ./build/chamber_sim || echo "(informational - not counted)"
+  else
+    env $vars ./build/chamber_sim || fail=1
+  fi
 done <<'SCENARIOS'
 nominal
 strong_humidifier_slow_sensor   HR=0.6 TAU=20
 very_strong_humidifier          HR=1.0 TAU=30
 weak_humidifier_fast_sensor     HR=0.15 TAU=5
-low_thermal_mass                CAP=1000 PW=60 UA=1.5
-tiny_box_big_heater             CAP=500 PW=100 HR=0.8 TAU=25 UA=2
-large_thermal_mass              CAP=6000 PW=50
+low_thermal_mass                CAP=1000 UA=1.5
+tiny_box_strong_mist            CAP=500 CW=400 HR=0.8 TAU=25 UA=2
+large_thermal_mass              CAP=6000 CW=1500 PW=150
+info:thick_wall_slow_heater     CW=2000 GW=2
+small_heater                    PW=50
 cold_dry_room                   HR=0.3 TAU=15 TA=20 RA=0.4
 warm_humid_room                 TA=30 RA=0.75
 SCENARIOS

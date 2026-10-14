@@ -1,15 +1,18 @@
 // =====================================================================
 //  SCC Chamber Environmental Control  —  Arduino UNO R3
 //
-//  Controls temperature and relative humidity inside a small
-//  stress-corrosion-cracking (SCC) test chamber:
+//  Controls temperature and relative humidity of the 3.5 wt% NaCl salt
+//  fog inside a stress-corrosion-cracking (SCC) test chamber:
 //    * DHT22 (AM2302) temperature / humidity sensor
-//    * USB ultrasonic humidifier module   -> humidity up
-//    * 12 V PTC heater (PWM)              -> temperature up
-//    * 12 V exhaust fan (fresh air)       -> humidity / temperature down
-//    * 12 V circulation fan               -> uniform chamber air
+//    * 4 x USB ultrasonic mist heads (one 5 V supply, switched together)
+//                                         -> salt fog / humidity up
+//    * heater outside the fog (silicone pad / SSR) -> temperature up
+//    * fresh-air blower outside the fog   -> humidity / temperature down
+//    * circulation fan (optional, IP68)   -> uniform chamber air
 //    * 16x2 I2C LCD keypad shield (5 buttons) for set-points
 //    * CSV logging to microSD (with RTC time stamps) and USB serial
+//  Every output is switched on/off (time-proportioning), so MOSFET modules,
+//  DC-input solid state relays or AC SSRs can all be used.
 //
 //  Target tolerance: +/-1.0 degC and +/-2.0 %RH (see config.h)
 //
@@ -51,7 +54,6 @@ Settings cfg;
 // ---------------------------------------------------------------------
 #define ALM_SENSOR    0x01   // DHT22 not responding
 #define ALM_OVERTEMP  0x02   // above T_ABS_MAX
-#define ALM_WATER     0x04   // humidifier tank empty
 #define ALM_BAND      0x08   // out of tolerance too long after being stable
 uint8_t alarms = 0;
 uint8_t alarmsMuted = 0;     // alarms acknowledged by a key press
@@ -78,9 +80,8 @@ uint8_t sensorFails = 0;
 float tInt = 0, rhInt = 0;     // integral terms (%)
 float rhOut = 0;               // humidity PI output, -100..+100 (split range)
 float tPrev = NAN;             // for derivative on measurement
-float heaterPct = 0, humPct = 0, exhaustPct = 0;
-bool  humOn = false, circOn = false;
-unsigned long humWindowStart = 0;
+float heaterPct = 0, mistPct = 0, ventPct = 0;
+bool  heaterOn = false, mistOn = false, ventOn = false, circOn = false;
 
 // statistics (valid after the chamber became stable)
 bool     stable = false;
@@ -261,39 +262,38 @@ void writeLoad(uint8_t pin, bool on) {
 }
 
 void writeOutputs() {
-  uint8_t pwm = (uint8_t)(heaterPct * 2.55f + 0.5f);
-  analogWrite(PIN_HEATER, LOAD_ON == HIGH ? pwm : 255 - pwm);
-  writeLoad(PIN_HUMIDIFIER, humOn);
-  // exhaust fan is speed controlled; below its start-up duty it is switched off
-  uint8_t ex = 0;
-  if (exhaustPct >= 1.0f)
-    ex = (uint8_t)((EXHAUST_MIN_PCT + (100 - EXHAUST_MIN_PCT) * exhaustPct / 100.0f) * 2.55f + 0.5f);
-  analogWrite(PIN_EXHAUST, LOAD_ON == HIGH ? ex : 255 - ex);
+  writeLoad(PIN_HEATER, heaterOn);
+  writeLoad(PIN_MIST, mistOn);
+  writeLoad(PIN_VENT, ventOn);
   writeLoad(PIN_CIRC_FAN, circOn);
 }
 
-// Humidifier is a USB module with its own driver board: it cannot be
-// PWM'd fast, so it is switched on/off inside a slow window
-// (time-proportioning) according to humPct. Pulses shorter than the
-// module start-up time are not dropped but carried over to the next
-// window, so the average output still equals humPct.
-unsigned long humOnMs = 0;
-float humCarryMs = 0;
+// Time-proportioning: an output demand of pct % becomes ON for pct % of a
+// fixed window. This suits loads that cannot (or should not) be PWM'd fast:
+// the mist heads' own driver boards, zero-cross AC solid state relays, fans.
+// On-times shorter than minOn are carried over to the next window instead
+// of being dropped, so the average output still equals pct.
+struct TimeProp {
+  unsigned long start, onMs;
+  float carry;
+};
+TimeProp tpHeater = {0, 0, 0}, tpMist = {0, 0, 0}, tpVent = {0, 0, 0};
 
-void updateHumidifier(unsigned long now) {
-  if (now - humWindowStart >= HUM_WINDOW_MS) {
-    humWindowStart = now;
-    float want = humPct * (HUM_WINDOW_MS / 100.0f) + humCarryMs;
-    if (want < HUM_MIN_ON_MS) {
-      humOnMs = 0;
-      humCarryMs = want;
+bool timeProp(TimeProp &tp, float pct, unsigned long now,
+              unsigned long window, unsigned long minOn) {
+  if (now - tp.start >= window) {
+    tp.start = now;
+    float want = pct * (window / 100.0f) + tp.carry;
+    if (want < minOn) {
+      tp.onMs = 0;
+      tp.carry = pct > 0 ? want : 0;
     } else {
-      humOnMs = want > HUM_WINDOW_MS ? HUM_WINDOW_MS : (unsigned long)want;
-      humCarryMs = 0;
+      tp.onMs = want > window ? window : (unsigned long)want;
+      tp.carry = 0;
     }
-    if (humPct <= 0) humCarryMs = 0;
   }
-  humOn = (now - humWindowStart) < humOnMs;
+  // pct == 0 (e.g. an alarm) switches off at once, not at the window end
+  return pct > 0 && (now - tp.start) < tp.onMs;
 }
 
 // =====================================================================
@@ -332,7 +332,6 @@ void controlStep() {
   uint8_t a = alarms & ALM_BAND;
   if (sensorFails >= SENSOR_FAIL_MAX) a |= ALM_SENSOR;
   if (valid && tMeas >= T_ABS_MAX) a |= ALM_OVERTEMP;
-  if (CHECK_WATER_LEVEL && digitalRead(PIN_WATER_LOW) == HIGH) a |= ALM_WATER;
   if ((a & ~alarms) != 0) {
     Serial.print(F("# ALARM 0x")); Serial.println(a, HEX);
   }
@@ -340,7 +339,7 @@ void controlStep() {
   alarmsMuted &= alarms;       // forget acknowledgements of cleared alarms
 
   if (!cfg.running) {
-    heaterPct = humPct = exhaustPct = rhOut = 0;
+    heaterPct = mistPct = ventPct = rhOut = 0;
     circOn = false;
     tInt = rhInt = 0;
     tPrev = tMeas;
@@ -350,7 +349,7 @@ void controlStep() {
   circOn = true;
 
   if (!valid) {                // no sensor -> fail safe
-    heaterPct = humPct = exhaustPct = 0;
+    heaterPct = mistPct = ventPct = 0;
     tPrev = NAN;
     return;
   }
@@ -363,20 +362,19 @@ void controlStep() {
   if (alarms & ALM_OVERTEMP) { heaterPct = 0; tInt = 0; }
 
   // ---- humidity: one PI, split range
-  //      rhOut > 0 -> humidifier duty, rhOut < 0 -> exhaust fan speed
+  //      rhOut > 0 -> mist heads, rhOut < 0 -> fresh-air blower
   float eRH = rhMeas - cfg.rhSet;
   float eT  = tMeas - cfg.tSet;
   rhOut = piStep(cfg.rhSet, rhMeas, rhInt, RH_KP, RH_KI, 0, dt, -100, 100, RH_IZONE);
-  humPct     = rhOut > 0 ? rhOut : 0;
-  exhaustPct = rhOut < 0 ? -rhOut : 0;
-  if (alarms & ALM_WATER) humPct = 0;
+  mistPct = rhOut > 0 ? rhOut : 0;
+  ventPct = rhOut < 0 ? -rhOut : 0;
 
   // ---- too hot with the heater already off: vent heat (hysteresis)
   static bool ventHeat = false;
   if (eT >= VENT_T_ON && heaterPct <= 0) ventHeat = true;
   else if (eT <= VENT_T_OFF)             ventHeat = false;
-  if (ventHeat && exhaustPct < VENT_T_PCT) exhaustPct = VENT_T_PCT;
-  if (alarms & ALM_OVERTEMP) { exhaustPct = 100; humPct = 0; }
+  if (ventHeat && ventPct < VENT_T_PCT) ventPct = VENT_T_PCT;
+  if (alarms & ALM_OVERTEMP) { ventPct = 100; mistPct = 0; }
 
   // ---- tolerance statistics
   unsigned long now = millis();
@@ -403,7 +401,7 @@ void controlStep() {
 //  Logging
 // =====================================================================
 void printHeader(Print &p) {
-  p.println(F("timestamp,t_C,rh_pct,t_set_C,rh_set_pct,heater_pct,humid_pct,exhaust_pct,in_band,stable,alarms"));
+  p.println(F("timestamp,t_C,rh_pct,t_set_C,rh_set_pct,heater_pct,mist_pct,vent_pct,in_band,stable,alarms"));
 }
 
 void printTimestamp(Print &p) {
@@ -433,8 +431,8 @@ void writeRecord(Print &p) {
   printNum(p, cfg.tSet, 1);     p.print(',');
   printNum(p, cfg.rhSet, 1);    p.print(',');
   printNum(p, heaterPct, 0);    p.print(',');
-  printNum(p, humPct, 0);       p.print(',');
-  printNum(p, exhaustPct, 0);   p.print(',');
+  printNum(p, mistPct, 0);      p.print(',');
+  printNum(p, ventPct, 0);      p.print(',');
   p.print(inBand ? 1 : 0);      p.print(',');
   p.print(stable ? 1 : 0);      p.print(',');
   p.println(alarms, HEX);
@@ -493,7 +491,6 @@ void setBacklight(uint8_t c) {
 const char *alarmText() {        // returns a PROGMEM string
   if (alarms & ALM_SENSOR)   return PSTR("!SENSOR FAIL");
   if (alarms & ALM_OVERTEMP) return PSTR("!OVER TEMP");
-  if (alarms & ALM_WATER)    return PSTR("!WATER LOW");
   if (alarms & ALM_BAND)     return PSTR("!OUT OF BAND");
   return PSTR("");
 }
@@ -536,8 +533,8 @@ void drawScreen() {
       break;
     }
     case SCR_OUTPUTS:
-      snprintf_P(l0, sizeof(l0), PSTR("Heat%3d%% Hum%3d%%"), (int)heaterPct, (int)humPct);
-      snprintf_P(l1, sizeof(l1), PSTR("Exh%3d%% Circ %s"), (int)exhaustPct, circOn ? "ON" : "OFF");
+      snprintf_P(l0, sizeof(l0), PSTR("Heat%3d%% Mst%3d%%"), (int)heaterPct, (int)mistPct);
+      snprintf_P(l1, sizeof(l1), PSTR("Vent%3d%% Fan %s"), (int)ventPct, circOn ? "ON" : "OFF");
       break;
     case SCR_STATS:
       if (!stable) {
@@ -719,11 +716,10 @@ void setup() {
   wdt_disable();
 #endif
   pinMode(PIN_HEATER, OUTPUT);
-  pinMode(PIN_HUMIDIFIER, OUTPUT);
-  pinMode(PIN_EXHAUST, OUTPUT);
+  pinMode(PIN_MIST, OUTPUT);
+  pinMode(PIN_VENT, OUTPUT);
   pinMode(PIN_CIRC_FAN, OUTPUT);
-  pinMode(PIN_BUZZER, OUTPUT);
-  pinMode(PIN_WATER_LOW, INPUT_PULLUP);
+  pinMode(PIN_ALARM, OUTPUT);
   writeOutputs();                       // everything off
 
   Serial.begin(SERIAL_BAUD);
@@ -752,7 +748,7 @@ void setup() {
   delay(2000);                          // DHT22 power-up time
   readSensor();
   tPrev = tMeas;
-  lastCtrlMs = lastLogMs = humWindowStart = millis();
+  lastCtrlMs = lastLogMs = millis();
 
 #ifdef __AVR__
   wdt_enable(WDTO_8S);
@@ -771,8 +767,9 @@ void loop() {
     controlStep();
   }
 
-  updateHumidifier(now);
-  if (!cfg.running || isnan(tMeas)) humOn = false;
+  heaterOn = timeProp(tpHeater, heaterPct, now, HEATER_WINDOW_MS, HEATER_MIN_ON_MS);
+  mistOn   = timeProp(tpMist,   mistPct,   now, MIST_WINDOW_MS,   MIST_MIN_ON_MS);
+  ventOn   = timeProp(tpVent,   ventPct,   now, VENT_WINDOW_MS,   VENT_MIN_ON_MS);
   writeOutputs();
 
   if (now - lastKeyPollMs >= 50) {
@@ -791,7 +788,8 @@ void loop() {
     drawScreen();
   }
 
-  // buzzer: beep pattern for un-acknowledged alarms
+  // alarm output (buzzer or lamp of a lighted button): blinks for
+  // un-acknowledged alarms, any key press acknowledges
   bool beep = (alarms & ~alarmsMuted) && ((now / 400UL) % 3 == 0);
-  digitalWrite(PIN_BUZZER, beep ? HIGH : LOW);
+  digitalWrite(PIN_ALARM, beep ? HIGH : LOW);
 }

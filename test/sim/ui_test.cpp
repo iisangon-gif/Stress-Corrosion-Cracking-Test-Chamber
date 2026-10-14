@@ -69,15 +69,15 @@ int main() {
   g_dhtFail = true;
   step(10000);
   expectRow(1, "!SENSOR FAIL", "sensor failure shown");
-  expect(heaterPct == 0 && humPct == 0 && g_pwm[PIN_HEATER] == 0 &&
-         g_pins[PIN_HUMIDIFIER] == LOW, "fail-safe: heater and humidifier off");
+  expect(heaterPct == 0 && mistPct == 0 && g_pins[PIN_HEATER] == LOW &&
+         g_pins[PIN_MIST] == LOW, "fail-safe: heater and mist heads off");
   g_dhtFail = false;
   step(5000);
   expect(!(alarms & ALM_SENSOR), "alarm clears when sensor recovers");
 
   Serial.in = "STOP\n";
   step(3000);
-  expect(g_pwm[PIN_HEATER] == 0 && g_pins[PIN_CIRC_FAN] == LOW, "STOP switches outputs off");
+  expect(g_pins[PIN_HEATER] == LOW && g_pins[PIN_MIST] == LOW && g_pins[PIN_CIRC_FAN] == LOW, "STOP switches outputs off");
 
   printf("%s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
   return failures ? 1 : 0;

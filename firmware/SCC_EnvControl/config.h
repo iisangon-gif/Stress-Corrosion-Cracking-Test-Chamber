@@ -20,14 +20,14 @@
 //  A4/A5 (SDA/SCL) : LCD keypad shield + RTC (I2C bus)
 //  D10..D13        : SD card (SPI) on the Data Logging Shield
 // ---------------------------------------------------------------------
-#define PIN_DHT           2   // DHT22 data (10k pull-up to 5V)
-#define PIN_HUMIDIFIER    3   // MOSFET module -> USB ultrasonic humidifier (5V)
-#define PIN_WATER_LOW     4   // optional float switch in humidifier tank (to GND)
-#define PIN_HEATER        5   // MOSFET module -> 12V PTC heater (PWM)
-#define PIN_EXHAUST       6   // MOSFET module -> 12V exhaust/fresh-air fan (PWM)
-#define PIN_CIRC_FAN      7   // MOSFET module -> 12V circulation fan
-#define PIN_BUZZER        8   // active buzzer
+#define PIN_DHT           2   // DHT22 data (pull-up to 5V, built into AM2302)
+#define PIN_MIST          3   // MOSFET / SSR -> 5V supply of the 4 ultrasonic mist heads
+#define PIN_HEATER        5   // SSR / MOSFET -> heater (outside the salt fog)
+#define PIN_VENT          6   // SSR / MOSFET -> fresh-air blower (outside the salt fog)
+#define PIN_CIRC_FAN      7   // SSR / MOSFET -> circulation fan (optional, IP68)
+#define PIN_ALARM         8   // active buzzer, or LED of a lighted push button
 #define PIN_SD_CS        10
+// free pins: D4, D9, A0..A3
 
 #define DHT_TYPE          DHT22   // AM2302
 
@@ -35,11 +35,9 @@
 #define T_OFFSET          0.0     // degC
 #define RH_OFFSET         0.0     // %RH
 
-// Logic level that turns a load ON (MOSFET modules = HIGH)
+// Logic level that turns a load ON (MOSFET modules and SSRs = HIGH,
+// most mechanical relay boards = LOW)
 #define LOAD_ON           HIGH
-
-// Float switch in the water tank: true = check it (closed to GND = water OK)
-#define CHECK_WATER_LEVEL false
 
 // ---------------------------------------------------------------------
 //  Default set-points (changed from the keypad / serial, kept in EEPROM)
@@ -64,24 +62,31 @@
 // ---------------------------------------------------------------------
 #define CTRL_PERIOD_MS   2000UL   // DHT22 cannot be read faster than 0.5 Hz
 
-// Temperature PI(D) -> heater PWM
-#define T_KP             20.0     // % per degC
-#define T_KI              0.05    // % per (degC * s)
-#define T_KD             60.0     // % per (degC / s), on measurement
+// Temperature PID -> heater (time-proportioned)
+#define T_KP             15.0     // % per degC
+#define T_KI              0.03    // % per (degC * s)
+#define T_KD            180.0     // % per (degC / s), on measurement
 #define T_IZONE           1.5     // degC: integrate only this close to set-point
 
-// Humidity PI (split range): + -> humidifier time-proportioning, - -> exhaust fan
+// Humidity PI (split range): + -> mist heads, - -> fresh-air blower
 #define RH_KP             5.0     // % per %RH
 #define RH_KI             0.01    // % per (%RH * s)
 #define RH_IZONE          5.0     // %RH: integrate only this close to set-point
-#define HUM_WINDOW_MS    5000UL   // time-proportioning window
-#define HUM_MIN_ON_MS     500UL   // shorter pulses are carried over (module start-up time)
 
-// Exhaust fan (D6, PWM): driven by the negative side of the humidity PI
-#define EXHAUST_MIN_PCT  30.0     // lowest PWM duty at which the fan still spins
+// Time-proportioning windows (output % -> ON-time within the window).
+// Shorter ON-times are carried over to the next window, not lost.
+#define HEATER_WINDOW_MS 2000UL   // 2 s = 100 mains half-cycles for a zero-cross SSR
+#define HEATER_MIN_ON_MS   20UL
+#define MIST_WINDOW_MS   5000UL
+#define MIST_MIN_ON_MS    500UL   // mist heads need ~0.3-0.5 s to start (1000 if the
+                                  // SSR switches the 230 V side of the USB adapter)
+#define VENT_WINDOW_MS  10000UL
+#define VENT_MIN_ON_MS   1500UL   // fan spin-up time
+
 // Venting heat when too hot and heater already off (hysteresis)
-#define VENT_T_ON         0.7     // degC above set-point -> exhaust >= VENT_T_PCT
-#define VENT_T_OFF        0.2
+#define VENT_T_ON         1.5     // degC above set-point -> vent >= VENT_T_PCT (last resort:
+                                  // venting also dries the fog)
+#define VENT_T_OFF        0.5
 #define VENT_T_PCT       50.0
 
 // ---------------------------------------------------------------------
