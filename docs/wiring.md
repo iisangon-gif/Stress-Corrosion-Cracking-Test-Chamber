@@ -4,7 +4,7 @@
 
 | Mega pin | Connected to | Type | Notes |
 |---|---|---|---|
-| **D20 / SDA, D21 / SCL** (also the SDA/SCL header next to AREF) | RGB LCD shield (0x20) + RTC (0x68) | I²C | provided by the stacked shields (see §1.1) |
+| **D20 / SDA, D21 / SCL** (also the SDA/SCL header next to AREF) | RGB LCD shield (0x20) + **DS3231 RTC module** (0x68) | I²C | the LCD shield takes them from its header; wire the DS3231 to the same two pins (see §1.1) |
 | **D2** | DHT22 / AM2302 **DATA** | digital in/out | pull-up to 5 V is built into the AM2302. For a bare DHT22, add 10 kΩ (4.7 kΩ for cables > 3 m) |
 | **D3** | **DC/DC SSR input (+)** → supply of the 4 mist-head drivers | digital out | timed bursts, 4 s window, ≥ 0.3 s. SSR input draws ~7–12 mA, which D3 can supply |
 | **D5** | **heater SSR** → silicone heater pad on the finned heat sink inside the chamber (DC/DC SSR for a 24 VDC pad, SSR-25DA for 230 VAC) | digital out | time-proportioned, 2 s window |
@@ -15,16 +15,27 @@
 | **D24** | **red LED** "ALARM" | digital out | fast blink = new alarm, steady = acknowledged, off = no alarm |
 | **D26** | **amber LED** "HEATER" | digital out | lit while the heater output is on |
 | **D28** | **blue LED** "MIST" | digital out | lit while the mist heads are on |
-| D10 | microSD CS | SPI | SD data on D50 (MISO), D51 (MOSI), D52 (SCK) via the ICSP header (see §1.1) |
+| **D50 / D51 / D52 / D53** | **microSD module** MISO / MOSI / SCK / CS | SPI | 6-pin module, VCC to 5 V (see §1.1) |
 | VIN | +12 V | power | |
 | GND | common ground | | shared with the 12 V supply and all MOSFET modules (SSR inputs are isolated) |
-| *free* | D4, D9, D11–D13, D23, D25, D27, D29–D49, A0–A15 | | float switch and door switch not fitted |
+| *free* | D4, D9–D13, D23, D25, D27, D29–D49, A0–A15 | | float switch and door switch not fitted |
 
-### 1.1 Using UNO-size shields on the Mega
+### 1.1 LCD shield, microSD module and DS3231 on the Mega
 
-* **Adafruit RGB LCD Shield:** use the R3 version, which takes I²C from the SDA/SCL pins next to AREF; on a Mega these are D20/D21. Older shields that only use A4/A5 need two jumper wires: A4 → D20 and A5 → D21.
-* **Data Logging Shield:** the **Adafruit rev B** reads the SD card through the **ICSP header**, so it works on the Mega unchanged (CS stays D10). Many cheap clones use D11–D13 for SPI, and those **do not work on a Mega** without jumper wires (D11 → D51, D12 → D50, D13 → D52). Alternatively, use a separate microSD module on D50–D53.
-* Stack order: Mega → Data Logging Shield → RGB LCD Shield. Wire the extra pins (D22–D28, D8 and the SSR signals) from the logging shield's proto area or directly from the Mega's headers.
+```
+ microSD module (6-pin)          DS3231 module
+   VCC  ── 5V                       VCC ── 5V
+   GND  ── GND                      GND ── GND
+   MISO ── D50                      SDA ── D20 (SDA)
+   MOSI ── D51                      SCL ── D21 (SCL)
+   SCK  ── D52                      (SQW, 32K: not used)
+   CS   ── D53
+```
+
+* **RGB LCD Shield:** plugs straight onto the Mega. Use the R3 version, which takes I²C from the SDA/SCL pins next to AREF (= D20/D21 on a Mega). Older shields that only use A4/A5 need two jumper wires: A4 → D20 and A5 → D21. Wire the other signals (SSRs, LEDs, buzzer, DHT22, SD, DS3231) from the Mega's headers, or use a stacking-header / screw-terminal shield under the LCD.
+* **microSD module:** choose one **with a 3.3 V regulator and a level shifter** (AMS1117 + 74LVC125A on the board); modules without them are 3.3 V only. Keep the SPI wires **≤ 15–20 cm**. Use a microSD card ≤ 32 GB formatted **FAT32**. This module type keeps MISO driven even when not selected, which only matters if another SPI device is added later.
+* **DS3231 module:** the common ZS-042 board has a charging circuit for the backup cell. With a **non-rechargeable CR2032**, remove its charging diode/resistor, or fit a rechargeable **LIR2032**. Its EEPROM (0x57) does not clash with the LCD (0x20) or RTC (0x68).
+* **Every module may be fitted later.** The controller reports at power-on what it found and looks again every minute (see [operation.md §2a](operation.md#2a-fitting-modules-later)).
 
 ### 1.2 Status LEDs and buzzer
 
@@ -43,7 +54,7 @@
 ## 2. Signal wiring
 
 ```
-                    Arduino Mega 2560 (+ logging shield + LCD shield)
+                    Arduino Mega 2560 (+ RGB LCD shield)
                 ┌──────────────────────────────────────┐
  AM2302   VCC ──┤ 5V                                   │
          DATA ──┤ D2                                   │
@@ -55,6 +66,8 @@
                 │ GND ──────► GND of all MOSFET modules│
                 │ D8 ───────► Buzzer +                 │   Buzzer − ── GND
                 │ D22/24/26/28 ─[330 Ω]─► LEDs         │   LED cathodes ── GND
+                │ D50/51/52/53 ─► microSD MISO/MOSI/SCK/CS│ module VCC 5V, GND
+                │ D20/D21 ────► DS3231 SDA/SCL         │   module VCC 5V, GND
                 └──────────────────────────────────────┘
 ```
 

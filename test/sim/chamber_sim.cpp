@@ -34,6 +34,10 @@ float g_tSens = 25, g_rhSens = 60;
 bool g_dhtFail = false;
 uint8_t g_buttons = 0;
 char g_lcd[2][17];
+bool g_i2c[128] = {false};
+bool g_sdCard = true;
+int g_sdBegins = 0;
+std::string g_sdData;
 
 static double env(const char *k, double def) {
   const char *v = getenv(k);
@@ -47,6 +51,7 @@ static double ahSat(double T) {
 }
 
 int main() {
+  g_i2c[0x20] = true;                 // LCD shield fitted
   const double C = env("CAP", 6000), UA = env("UA", 2.3), Pmax = env("PW", 200);
   const double Cw = env("CW", 450), Gw = env("GW", 10), UAw = env("UAW", 0);  // heat sink
   const double humRate = env("HR", 0.19), tau = env("TAU", 15), V = env("V", 0.2);

@@ -3,7 +3,7 @@
 Arduino Mega 2560 controller for a **stress corrosion cracking (SCC) test chamber**: a plastic box of **50 × 80 × 50 cm (200 L)**. It fills the chamber with **3.5 wt% NaCl salt fog** from 4 ultrasonic mist heads, holds a set temperature and relative humidity within **±1 °C** and **±2 %RH**, and records both.
 
 > **สรุปภาษาไทย:** ตู้จำลองสภาวะไอน้ำทะเล พ่นหมอกน้ำเกลือ NaCl 3.5 %wt ด้วยหัวพ่น Ultrasonic 4 หัว (ทำงานพร้อมกัน ผ่าน DC/DC SSR)
-> ควบคุมอุณหภูมิและความชื้นด้วย Arduino Mega 2560 + DHT22 มี Buzzer และ LED แสดงสถานะ 4 ดวง ให้อยู่ใน ±1 °C / ±2 %RH ตั้งค่าผ่านจอ LCD I²C พร้อมปุ่มกด
+> ควบคุมอุณหภูมิและความชื้นด้วย Arduino Mega 2560 + DHT22 มี Buzzer และ LED แสดงสถานะ 4 ดวง บันทึกลง Micro SD + DS3231 (ต่อทีหลังได้) ให้อยู่ใน ±1 °C / ±2 %RH ตั้งค่าผ่านจอ LCD I²C พร้อมปุ่มกด
 > และบันทึกข้อมูลลง microSD/คอมพิวเตอร์ ตู้พลาสติก 50 × 80 × 50 cm (200 ลิตร) ฮีตเตอร์เป็นแผ่นซิลิโคนบน Al heat sink มีครีบ + พัดลม **อยู่ในตู้**
 > จึงต้องป้องกัน corrosion และไฟรั่ว (แนะนำ 24 VDC, เคลือบครีบ, KSD301 + thermal fuse) ดูหัวข้อ 0.5 ในเอกสารภาษาไทย
 > คำอธิบายอุปกรณ์และเหตุผลการออกแบบภาษาไทย: **[docs/design-notes-th.md](docs/design-notes-th.md)**
@@ -33,7 +33,7 @@ Arduino Mega 2560 controller for a **stress corrosion cracking (SCC) test chambe
                                     │  4 × ultrasonic mist heads (D3) in 3.5 % NaCl│
                                     └──────────────────────────────────────────────┘
 
-  Arduino Mega 2560 + Data Logging Shield rev B (SD + RTC) + RGB LCD Shield (16x2, 5 keys)
+  Arduino Mega 2560 + RGB LCD Shield (16x2, 5 keys) + microSD module (D50–D53) + DS3231 RTC (I²C)
   D8 → buzzer     D22 green RUN · D24 red ALARM · D26 amber HEATER · D28 blue MIST
 ```
 
@@ -44,7 +44,8 @@ Arduino Mega 2560 controller for a **stress corrosion cracking (SCC) test chambe
 * **All outputs are on/off** (time-proportioned): heater SSR (D5; DC/DC SSR for a 24 V pad, SSR-25DA for 230 V), and a DC/DC SSR for the mist-head supply (D3, in the 12 V feed of the 12→5 V step-down). MOSFET modules also work.
 * **Input / display:** set T and RH with the keypad (or serial), saved in EEPROM. The backlight turns **green** when stable in tolerance and **red** on alarm.
 * **Buzzer + status LEDs:** the buzzer beeps for new alarms until a key is pressed. Green = running/in tolerance, red = alarm, amber = heater on, blue = mist on.
-* **Recording:** CSV to microSD (one file per day, RTC time stamps) and to USB serial.
+* **Recording:** CSV to a microSD module (one file per day, DS3231 time stamps) and to USB serial.
+* **Build it up step by step:** it runs with any module missing, prints what it found at power-on (`DEVICES` command), and picks up an SD card, RTC or LCD fitted later without a reset.
 * **Safety:** sensor-fail and over-temperature cut-outs, an out-of-band alarm, an 8 s watchdog, and a KSD301 75 °C bimetal plus ~100 °C thermal fuse on the heater heat sink.
 
 ## Quick start
@@ -58,6 +59,6 @@ Arduino Mega 2560 controller for a **stress corrosion cracking (SCC) test chambe
 
 ## Firmware facts
 
-* Mega 2560 usage: **~33 KB / 256 KB flash, ~1.5 KB / 8 KB RAM**, which leaves plenty of room for additions.
-* On every push, GitHub Actions compiles the sketch for `arduino:avr:mega` and runs `test/sim/run.sh`. That covers the UI, fail-safe behaviour, and buzzer/LED behaviour, and closed-loop tolerance checks on 15 variants of the 200 L chamber across the operating range.
+* Mega 2560 usage: **~34 KB / 256 KB flash, ~1.5 KB / 8 KB RAM**, which leaves plenty of room for additions.
+* On every push, GitHub Actions compiles the sketch for `arduino:avr:mega` and runs `test/sim/run.sh`. That covers the UI, fail-safe behaviour, and buzzer/LED behaviour, modules missing or fitted later, and closed-loop tolerance checks on 15 variants of the 200 L chamber across the operating range.
 * Gains come from simulation. Verify them on your chamber ([operation.md §5](docs/operation.md#5-tuning-on-the-real-chamber)).

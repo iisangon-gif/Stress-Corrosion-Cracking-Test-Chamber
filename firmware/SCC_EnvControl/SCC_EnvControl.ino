@@ -10,7 +10,8 @@
 //    * fresh-air blower outside the fog   -> humidity / temperature down
 //    * circulation fan (optional, IP68)   -> uniform chamber air
 //    * 16x2 I2C LCD keypad shield (5 buttons) for set-points
-//    * CSV logging to microSD (with RTC time stamps) and USB serial
+//    * CSV logging to a microSD module (DS3231 time stamps) and USB serial
+//    * buzzer + 4 status LEDs; every module may be fitted later
 //  Every output is switched on/off (time-proportioning), so MOSFET modules,
 //  DC-input solid state relays or AC SSRs can all be used.
 //
@@ -68,12 +69,15 @@ uint8_t alarmsMuted = 0;     // alarms acknowledged by a key press
 DHT dht(PIN_DHT, DHT_TYPE);
 Adafruit_RGBLCDShield lcd;
 
+#define LCD_I2C_ADDR 0x20      // MCP23017 on the RGB LCD shield
+bool lcdOk = false;
 #ifdef USE_RTC
   bool rtcOk = false;
 #endif
 #ifdef USE_SD
   bool sdOk = false;
 #endif
+unsigned long lastDeviceCheckMs = 0;
 
 // ---------------------------------------------------------------------
 //  Process values and controller state
@@ -103,12 +107,13 @@ unsigned long lastCtrlMs = 0, lastLogMs = 0, lastLcdMs = 0, lastKeyPollMs = 0;
 //  UI state
 // ---------------------------------------------------------------------
 enum { SCR_MAIN, SCR_OUTPUTS, SCR_STATS, SCR_LOG, SCR_COUNT };
-enum { MENU_TSET, MENU_RHSET, MENU_LOG, MENU_RUN, MENU_COUNT };
+enum { MENU_TSET, MENU_RHSET, MENU_LOG, MENU_RUN, MENU_RESET, MENU_COUNT };
 
 uint8_t screen = SCR_MAIN;
 bool    inMenu = false;
 uint8_t menuItem = 0;
 Settings edit;                 // working copy while in the menu
+bool    resetRequested = false;
 unsigned long lastKeyMs = 0;
 uint8_t backlight = 0xFF;
 
@@ -119,6 +124,9 @@ uint8_t serialLen = 0;
 //  Helpers
 // =====================================================================
 inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+void printDevices();
+void checkDevices();
 
 // tSet == 0 means "ROOM": no temperature control, temperature is only logged
 #define T_ROOM 0.0f
@@ -487,7 +495,8 @@ void logRecord() {
     writeRecord(f);
     f.close();
   } else {
-    Serial.println(F("# SD write failed"));
+    sdOk = false;                       // card removed or faulty: look again later
+    Serial.println(F("# SD write failed - card removed? will retry"));
   }
 #endif
 }
@@ -533,14 +542,16 @@ void drawScreen() {
       case MENU_TSET:  name = PSTR("Set Temperature"); break;
       case MENU_RHSET: name = PSTR("Set Humidity");    break;
       case MENU_LOG:   name = PSTR("Log interval");    break;
-      default:         name = PSTR("Run / Stop");      break;
+      case MENU_RUN:   name = PSTR("Run / Stop");      break;
+      default:         name = PSTR("Reset stats");     break;
     }
     snprintf_P(l0, sizeof(l0), PSTR(">%S"), name);
     switch (menuItem) {
       case MENU_TSET:  snprintf_P(l1, sizeof(l1), PSTR(" %s C"), fmtSet(a, edit.tSet)); break;
       case MENU_RHSET: snprintf_P(l1, sizeof(l1), PSTR(" %s %%RH"), fmt(a, edit.rhSet, 4, 1)); break;
       case MENU_LOG:   snprintf_P(l1, sizeof(l1), PSTR(" %u s"), edit.logSec); break;
-      default:         snprintf_P(l1, sizeof(l1), PSTR(" %s"), edit.running ? "RUN" : "STOP"); break;
+      case MENU_RUN:   snprintf_P(l1, sizeof(l1), PSTR(" %s"), edit.running ? "RUN" : "STOP"); break;
+      default:         snprintf_P(l1, sizeof(l1), PSTR(" %s"), resetRequested ? "YES" : "no"); break;
     }
     char row[20];
     snprintf_P(row, sizeof(row), PSTR("%-12.12s<  >"), l1);   // LEFT/RIGHT change value
@@ -613,7 +624,8 @@ void menuAdjust(int8_t dir, uint8_t accel) {
       edit.logSec = v < 1 ? 1 : (v > 3600 ? 3600 : v);
       break;
     }
-    default:         edit.running = !edit.running; break;
+    case MENU_RUN:   edit.running = !edit.running; break;
+    default:         resetRequested = !resetRequested; break;
   }
 }
 
@@ -638,7 +650,7 @@ void handleKeys() {
     lastRepeat = now;
     pressed = keys & (BUTTON_LEFT | BUTTON_RIGHT);
     accel = (now - pressedAt > 2000) ? 10 : 1;
-    if (menuItem == MENU_RUN) pressed = 0;   // no repeat for the toggle
+    if (menuItem >= MENU_RUN) pressed = 0;   // no repeat for the toggles
   }
   if (!pressed) {
     if (inMenu && now - lastKeyMs > 30000UL) inMenu = false;          // timeout: discard
@@ -647,7 +659,7 @@ void handleKeys() {
 
   if (!inMenu) {
     if (pressed & BUTTON_SELECT) {
-      inMenu = true; menuItem = 0; edit = cfg;
+      inMenu = true; menuItem = 0; edit = cfg; resetRequested = false;
     } else if (pressed & BUTTON_UP) {
       screen = (screen + SCR_COUNT - 1) % SCR_COUNT;
     } else if (pressed & BUTTON_DOWN) {
@@ -656,6 +668,7 @@ void handleKeys() {
   } else {
     if (pressed & BUTTON_SELECT) {      // save and leave
       applySettings(edit);
+      if (resetRequested) resetStats();
       inMenu = false;
       Serial.println(F("# settings saved"));
     } else if (pressed & BUTTON_UP) {
@@ -688,7 +701,7 @@ void printStatus() {
 }
 
 void printHelp() {
-  Serial.println(F("# HELP | STATUS | RUN | STOP | RESET | HEADER"));
+  Serial.println(F("# HELP | STATUS | DEVICES | RUN | STOP | RESET | HEADER"));
   Serial.println(F("# SET T <C|ROOM> | SET RH <%> | SET LOG <s>"));
   Serial.println(F("# TIME YYYY-MM-DD HH:MM:SS"));
 }
@@ -701,6 +714,7 @@ void handleCommand(char *line) {
 
   if      (!strcasecmp(cmd, "HELP"))   printHelp();
   else if (!strcasecmp(cmd, "STATUS")) printStatus();
+  else if (!strcasecmp(cmd, "DEVICES")) printDevices();
   else if (!strcasecmp(cmd, "HEADER")) printHeader(Serial);
   else if (!strcasecmp(cmd, "RESET"))  resetStats();
   else if (!strcasecmp(cmd, "RUN"))    { s.running = 1; applySettings(s); }
@@ -720,6 +734,7 @@ void handleCommand(char *line) {
 #ifdef USE_RTC
   else if (!strcasecmp(cmd, "TIME")) {
     char *rest = strtok(NULL, "");
+    if (!rtcOk) Serial.println(F("# RTC not found"));
     ok = rest && rtcOk && rtcSetFromText(rest);
   }
 #endif
@@ -737,6 +752,66 @@ void serialLoop() {
       serialBuf[serialLen++] = c;
     }
   }
+}
+
+// =====================================================================
+//  Optional modules: detect at power-on, and again every DEVICE_RETRY_MS
+// =====================================================================
+bool i2cPresent(uint8_t addr) {
+  Wire.beginTransmission(addr);
+  return Wire.endTransmission() == 0;
+}
+
+void checkDevices() {
+  // LCD keypad shield (I2C): (re)initialise when it appears
+  bool l = i2cPresent(LCD_I2C_ADDR);
+  if (l && !lcdOk) {
+    lcd.begin(16, 2);
+    backlight = 0xFF;                   // force the colour to be resent
+    lcd.clear();
+    if (lastDeviceCheckMs) Serial.println(F("# LCD found"));
+  } else if (!l && lcdOk) {
+    Serial.println(F("# LCD lost"));
+  }
+  lcdOk = l;
+
+#ifdef USE_RTC
+  bool r = rtcOk ? i2cPresent(RTC_ADDR) : rtcBegin();
+  if (r != rtcOk && lastDeviceCheckMs) Serial.println(r ? F("# RTC found") : F("# RTC lost"));
+  rtcOk = r;
+#endif
+
+#ifdef USE_SD
+  if (!sdOk) {
+    // SD.begin() blocks for up to ~2 s when no card is fitted: hold the
+    // heater and mist off meanwhile (the safe direction) and keep the
+    // watchdog fed.
+    heaterOn = mistOn = false;
+    writeOutputs();
+  #ifdef __AVR__
+    wdt_reset();
+  #endif
+    SD.end();
+    sdOk = SD.begin(PIN_SD_CS);
+    if (sdOk && lastDeviceCheckMs) Serial.println(F("# SD card found"));
+  }
+#endif
+}
+
+// one line per module, e.g. "# LCD OK | RTC OK 2026-10-14 09:00:00 | SD OK | DHT22 OK"
+void printDevices() {
+  Serial.print(F("# LCD "));    Serial.print(lcdOk ? F("OK") : F("not found"));
+#ifdef USE_RTC
+  Serial.print(F(" | RTC "));
+  Clock n;
+  if (!rtcOk) Serial.print(F("not found"));
+  else if (rtcRead(n) && n.yy >= 24) { Serial.print(F("OK ")); printTimestamp(Serial); }
+  else Serial.print(F("OK, time not set (use TIME)"));
+#endif
+#ifdef USE_SD
+  Serial.print(F(" | SD "));    Serial.print(sdOk ? F("OK") : F("not found"));
+#endif
+  Serial.print(F(" | DHT22 ")); Serial.println(isnan(tMeas) ? F("not responding") : F("OK"));
 }
 
 // =====================================================================
@@ -793,27 +868,27 @@ void setup() {
   loadSettings();
   dht.begin();
 
-  lcd.begin(16, 2);
-  setBacklight(0x7);
-  lcdRow(0, "SCC Env Control");
-  lcdRow(1, "starting...");
-
-#ifdef USE_RTC
-  rtcOk = rtcBegin();
-  if (!rtcOk) Serial.println(F("# RTC not found"));
+  Wire.begin();
+#ifdef __AVR__
+  Wire.setWireTimeout(I2C_TIMEOUT_US, true);   // never hang on a bad I2C bus
 #endif
 #ifdef USE_SD
   pinMode(PIN_SD_CS, OUTPUT);
-  sdOk = SD.begin(PIN_SD_CS);
-  Serial.println(sdOk ? F("# SD OK") : F("# SD not found"));
+  digitalWrite(PIN_SD_CS, HIGH);
 #endif
+  checkDevices();
+  if (lcdOk) {
+    lcdRow(0, "SCC Env Control");
+    lcdRow(1, "starting...");
+  }
 
   printHelp();
-  printHeader(Serial);
   delay(2000);                          // DHT22 power-up time
   readSensor();
+  printDevices();
+  printHeader(Serial);
   tPrev = tMeas;
-  lastCtrlMs = lastLogMs = millis();
+  lastCtrlMs = lastLogMs = lastDeviceCheckMs = millis();
 
 #ifdef __AVR__
   wdt_enable(WDTO_8S);
@@ -837,7 +912,12 @@ void loop() {
   ventOn   = timeProp(tpVent,   ventPct,   now, VENT_WINDOW_MS,   VENT_MIN_ON_MS);
   writeOutputs();
 
-  if (now - lastKeyPollMs >= 50) {
+  if (now - lastDeviceCheckMs >= DEVICE_RETRY_MS) {
+    lastDeviceCheckMs = now;
+    checkDevices();
+  }
+
+  if (lcdOk && now - lastKeyPollMs >= 50) {
     lastKeyPollMs = now;
     handleKeys();
   }
@@ -848,7 +928,7 @@ void loop() {
     logRecord();
   }
 
-  if (now - lastLcdMs >= 500) {
+  if (lcdOk && now - lastLcdMs >= 500) {
     lastLcdMs = now;
     drawScreen();
   }

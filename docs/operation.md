@@ -10,8 +10,9 @@
    (`Wire`, `SPI` and `EEPROM` come with the IDE. The RTC is driven directly, so RTClib is not needed.)
 3. Open `firmware/SCC_EnvControl/SCC_EnvControl.ino`.
 4. Check `config.h`:
-   * `RTC_IS_PCF8523 1` for the Adafruit Data Logging Shield rev B, or `0` for DS1307 shields/clones
-   * comment out `USE_SD` / `USE_RTC` if you do not fit the logging shield
+   * `RTC_IS_PCF8523 0` for the DS3231 module (default; also right for DS1307). Use `1` only for a PCF8523 (Adafruit Data Logging Shield rev B)
+   * `PIN_SD_CS 53` for the microSD module (default)
+   * `USE_SD` / `USE_RTC` can stay on even before the modules are fitted (see §2a)
 5. Select **Tools → Board → Arduino AVR Boards → Arduino Mega or Mega 2560** (Processor: ATmega2560) and upload. Choosing UNO stops the build with an error, because the LED pins exist only on the Mega.
 6. Open the Serial Monitor at **115200 baud**, line ending **Newline**, and set the clock once:
    ```
@@ -55,9 +56,41 @@ Status tag on the main screen: `..` = settling, `OK` = stable (in tolerance for 
 
 At power-on all LEDs light and the buzzer beeps once (lamp test).
 
-**Menu items:** Set Temperature (20.0–40.0 °C in 0.1 steps; LEFT below 20.0 gives **ROOM** = no heating, temperature only logged), Set Humidity (20–80 %RH, 0.5 steps), Log interval (1–3600 s), Run / Stop. To reset the statistics, change a set-point or send `RESET`.
+**Menu items:** Set Temperature (20.0–40.0 °C in 0.1 steps; LEFT below 20.0 gives **ROOM** = no heating, temperature only logged), Set Humidity (20–80 %RH, 0.5 steps), Log interval (1–3600 s), Run / Stop, Reset stats. Changing a set-point or sending `RESET` also resets the statistics.
 
 The lowest reachable RH depends on the room air. See [design-notes-th.md §0.4](design-notes-th.md) for a table, and use a silica-gel cartridge on the fresh-air inlet for lower RH.
+
+## 2a. Fitting modules later
+
+The controller runs with any of these modules missing, so the chamber can be built up step by step:
+
+| Module missing | What happens |
+|---|---|
+| microSD module / card | records still go to USB serial; LCD Log screen shows `SD --` |
+| DS3231 | time stamps are seconds since power-on; the SD file is `DATALOG.CSV` instead of one file per day |
+| LCD shield | control runs; set it up over USB serial |
+| DHT22 | `!SENSOR FAIL`: heater and mist stay **off** (fail-safe), buzzer beeps |
+| SSRs / heater / mist / fans / LEDs / buzzer | the outputs switch as usual, with no feedback; watch the amber/blue LEDs to check the logic before connecting loads |
+
+At power-on the serial monitor shows one line like:
+
+```
+# LCD OK | RTC OK 2026-10-14 09:00:00 | SD not found | DHT22 OK
+```
+
+and `DEVICES` prints it again at any time. Missing modules are looked for **every minute**, so an SD card, DS3231 or LCD fitted later is picked up **without a reset** ("# SD card found", "# RTC found", "# LCD found"). While the SD card is missing, each search can take ~2 s, and the heater and mist are held off during it. If a card is pulled out, the next write fails, and the controller keeps running and searches again.
+
+After fitting the DS3231 for the first time, set the clock once: `TIME 2026-10-14 09:00:00`.
+
+**Always connect or remove modules with the power off.** Hot-plugging can damage the SD card or the I²C bus.
+
+Suggested bring-up order:
+
+1. Mega + DHT22 + LCD: check T/RH on the screen and the keypad.
+2. LEDs + buzzer: lamp test at power-on; unplug the DHT22 and the buzzer should beep.
+3. DS3231 + microSD: `TIME …`, then check that `YYMMDD.CSV` appears on the card.
+4. SSRs with a test lamp or a small load: they should follow the amber/blue LEDs.
+5. Real loads: heater (with KSD301 + thermal fuse), mist heads, fans.
 
 ## 3. Serial commands (115200 baud)
 
@@ -70,6 +103,7 @@ The lowest reachable RH depends on the room air. See [design-notes-th.md §0.4](
 | `RUN` / `STOP` | start / stop control (STOP switches all outputs off) |
 | `RESET` | reset stability statistics |
 | `STATUS` | one CSV record plus run state, in-band %, max deviations |
+| `DEVICES` | which modules are fitted: LCD, RTC (with its time), SD card, DHT22 |
 | `HEADER` | print the CSV header |
 | `TIME YYYY-MM-DD HH:MM:SS` | set the RTC |
 | `HELP` | list commands |
@@ -147,5 +181,6 @@ Put the DHT22 in a sealed jar above a **saturated NaCl slurry**, which is 75.3 %
 | RH does not reach the set-point | voltage at the mist drivers ≥ 4.75 V while all 4 run (DC SSR drop), salt-solution level, mist heads start without a button press, crusted heads (rinse with DI water), blower stuck on, box leaking |
 | RH cannot be lowered | room air is too humid. The fresh-air blower can only bring RH down to the room's moisture content |
 | LCD blank | contrast pot on the shield; I²C address conflicts |
-| `SD not found` | FAT32 card inserted before power-up; CS = D10 |
-| Clock wrong / `No RTC` | battery fitted; `RTC_IS_PCF8523` matches the shield; set it with `TIME` |
+| `SD not found` | card ≤ 32 GB, FAT32; wiring D50–D53 + 5 V; SPI wires short; module has a level shifter. A card inserted later is found within 1 minute |
+| Clock wrong / `No RTC` / `time not set` | DS3231 on D20/D21 + 5 V; backup cell fitted; `RTC_IS_PCF8523 0`; set the time with `TIME` |
+| Program restarts every few seconds | look at the power-on report: a short on the I²C bus or a missing 5 V is reset by the I²C timeout, but fix the wiring |

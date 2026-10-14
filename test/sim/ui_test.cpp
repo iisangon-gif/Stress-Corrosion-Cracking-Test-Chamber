@@ -10,6 +10,10 @@ float g_tSens = 34.9, g_rhSens = 69.5;
 bool g_dhtFail = false;
 uint8_t g_buttons = 0;
 char g_lcd[2][17];
+bool g_i2c[128] = {false};
+bool g_sdCard = true;
+int g_sdBegins = 0;
+std::string g_sdData;
 
 static int failures = 0;
 
@@ -37,6 +41,7 @@ static void expect(bool cond, const char *what) {
 }
 
 int main() {
+  g_i2c[0x20] = true;                 // LCD shield fitted
   memset(g_lcd, ' ', sizeof(g_lcd));
   setup();
   step(3000);

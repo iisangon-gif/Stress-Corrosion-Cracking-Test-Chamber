@@ -7,18 +7,24 @@
 // ---------------------------------------------------------------------
 //  Optional modules (comment out to disable)
 // ---------------------------------------------------------------------
-#define USE_SD            // microSD logging (Data Logging Shield, CS = D10)
-#define USE_RTC           // real-time clock on the Data Logging Shield
+// Every module may be missing at power-on: the controller still runs, says
+// what it found (serial + LCD) and looks again every DEVICE_RETRY_MS, so a
+// module can be fitted later (SD card, RTC, LCD) without editing the code.
+#define USE_SD            // microSD card module, 6-pin SPI (D50-D53)
+#define USE_RTC           // DS3231 real-time clock module (I2C)
 
-// RTC chip on the logging shield:
-//   Adafruit Data Logging Shield rev B -> PCF8523  (set 1)
-//   older Adafruit rev A / most clones -> DS1307   (set 0)
-#define RTC_IS_PCF8523    1
+// RTC chip:
+//   DS3231 / DS1307 module                      -> 0  (same time registers)
+//   PCF8523 (Adafruit Data Logging Shield rev B) -> 1
+#define RTC_IS_PCF8523    0
+
+#define DEVICE_RETRY_MS  60000UL  // look again for a missing SD card / RTC / LCD
+#define I2C_TIMEOUT_US   25000UL  // a stuck I2C bus is reset instead of hanging
 
 // ---------------------------------------------------------------------
 //  Pins (Arduino Mega 2560)
-//  D20/D21 (SDA/SCL, also the SDA/SCL header next to AREF): LCD shield + RTC
-//  D50..D52 / ICSP (SPI) + D10 (CS): SD card on the Data Logging Shield
+//  D20/D21 (SDA/SCL, also the SDA/SCL header next to AREF): LCD shield + DS3231
+//  D50 MISO, D51 MOSI, D52 SCK, D53 CS: microSD card module
 // ---------------------------------------------------------------------
 #define PIN_DHT           2   // DHT22 data (pull-up to 5V, built into AM2302)
 #define PIN_MIST          3   // DC-DC SSR input -> 5 V supply of the 4 mist-head drivers
@@ -31,7 +37,7 @@
                               // (REQUIRED: on whenever the controller is running, so
                               // the heater never runs without air flow)
 #define PIN_BUZZER        8   // active buzzer (beeps for un-acknowledged alarms)
-#define PIN_SD_CS        10
+#define PIN_SD_CS        53   // CS of the microSD module (the Mega's SS pin)
 
 // Status LEDs (each LED + 330-1k resistor to GND, or 5 V panel LEDs)
 #define PIN_LED_RUN      22   // green : steady = stable in tolerance, blinking = settling
@@ -39,7 +45,7 @@
 #define PIN_LED_HEAT     26   // amber : heater output on
 #define PIN_LED_MIST     28   // blue  : mist heads on
 #define LED_ON          HIGH
-// free pins: D4, D9, D11-D13 (not used by SD on the Mega), D23.., A0..A15
+// free pins: D4, D9-D13, D23, D25, D27, D29-D49, A0..A15
 
 #define DHT_TYPE          DHT22   // AM2302
 

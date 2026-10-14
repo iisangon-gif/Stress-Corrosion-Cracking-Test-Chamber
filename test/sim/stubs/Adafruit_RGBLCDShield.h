@@ -14,4 +14,5 @@ struct Adafruit_RGBLCDShield {
   void setCursor(int col, int row) { c = col; r = row; }
   void print(const char *s) { for (; *s && c < 16; s++) g_lcd[r][c++] = *s; }
   uint8_t readButtons() { return g_buttons; }
+  void clear() { memset(g_lcd, ' ', sizeof(g_lcd)); }
 };

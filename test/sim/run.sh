@@ -6,11 +6,14 @@ cd "$(dirname "$0")"
 mkdir -p build
 CXX=${CXX:-g++}
 $CXX -std=c++17 -O2 -Istubs -x c++ ui_test.cpp      -o build/ui_test
+$CXX -std=c++17 -O2 -Istubs -x c++ devices_test.cpp -o build/devices_test
 $CXX -std=c++17 -O2 -Istubs -x c++ chamber_sim.cpp  -o build/chamber_sim
 $CXX -std=c++17 -O2 -Istubs -DMIST_AC_SIDE_SWITCH=1 -x c++ chamber_sim.cpp -o build/chamber_sim_ac
 
 echo "== UI test"
 ./build/ui_test
+echo "== Devices test (modules missing / fitted later)"
+./build/devices_test
 
 fail=0
 while read -r name vars; do

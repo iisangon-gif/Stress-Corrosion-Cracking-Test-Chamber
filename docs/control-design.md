@@ -4,7 +4,7 @@
 
 | Item | Requirement | How it is met |
 |---|---|---|
-| Controller | Arduino Mega 2560 | ATmega2560. The sketch uses ~33 KB of 256 KB flash and 1.5 KB of 8 KB RAM |
+| Controller | Arduino Mega 2560 | ATmega2560. The sketch uses ~34 KB of 256 KB flash and 1.5 KB of 8 KB RAM |
 | Chamber | plastic box 50 × 80 × 50 cm (W × L × H) = 200 L | 4 mist heads are sufficient (7–28 % duty). Heater 200 W with 20 mm insulation, 300 W without |
 | Environment | salt fog of 3.5 wt% NaCl (ASTM conformance not required) | 4 USB ultrasonic mist heads in the salt solution, switched together |
 | Sensor | 1 × DHT | **DHT22 / AM2302** (see §5) |
@@ -13,7 +13,8 @@
 | Tolerance | ±2 %RH, ±1 °C | PID / split-range PI. Simulated worst case over 15 chamber variants: ±0.71 °C, ±1.26 %RH |
 | Display / input | 16×2 I²C LCD shield with buttons | Adafruit RGB LCD Shield (MCP23017, 5 keys, I²C only) |
 | Status indication | buzzer + LEDs | buzzer (D8), green RUN / red ALARM / amber HEATER / blue MIST LEDs (D22–D28), plus the LCD backlight colour |
-| Recording | T and RH logged | CSV on microSD (RTC time stamps) and CSV on USB serial |
+| Recording | T and RH logged | CSV on a microSD module (DS3231 time stamps) and CSV on USB serial |
+| Partial builds | modules can be fitted later | runs with any module missing, reports what it found, re-detects SD / RTC / LCD every minute |
 | Corrosion | heater module sits inside the salt fog | 24 VDC pad, coated heat sink, sealed leads, IP68 fan, bimetal + thermal fuse, mounted away from the mist ([design-notes-th.md §0.5](design-notes-th.md)). The fresh-air blower is outside |
 
 ## 2. Architecture
@@ -35,7 +36,8 @@ flowchart LR
     MEGA -- D8 --> AL[Buzzer]
     MEGA -- D22..D28 --> LED[Status LEDs<br/>RUN / ALARM / HEAT / MIST]
     MEGA <-- I2C --> LCD[RGB LCD shield<br/>16x2 + 5 keys]
-    MEGA <-- I2C / SPI --> LOG[Data-logging shield<br/>RTC + microSD]
+    MEGA <-- SPI D50-D53 --> SDM[microSD module]
+    MEGA <-- I2C --> RTC[DS3231 RTC]
     MEGA <-- USB --> PC[PC: serial_logger.py]
 ```
 
@@ -110,6 +112,8 @@ At 35 °C / 80 %RH, **a 1 °C change in air temperature changes RH by about 4.3 
 | Out of tolerance > 10 min after having been stable (e.g. salt solution ran out, lid left open, heater failed) | "!OUT OF BAND" alarm, logged |
 | Any key press | acknowledges the current alarms: the buzzer stops, and the red LED goes from blinking to steady |
 | Program hang | 8 s hardware watchdog. All outputs start OFF and the settings are restored from EEPROM |
+| I²C fault (loose wire, short) | 25 ms I²C timeout resets the bus instead of hanging; the module is reported lost and searched for again |
+| SD card missing or removed | logging continues on USB serial; the card is searched for every minute (heater/mist held off during the ~2 s search) |
 | Independent of software | **KSD301 75 °C bimetal + ~100 °C thermal fuse on the heater heat sink** (also cover a stopped fan, which software cannot detect) |
 
 **Not fitted (by choice):** the salt-solution low-level switch and the door switch. Check the solution level by eye, and press STOP before opening the lid. See [design-notes-th.md §1](design-notes-th.md).
