@@ -80,11 +80,14 @@ uint8_t sensorFails = 0;
 float tInt = 0, rhInt = 0;     // integral terms (%)
 float rhOut = 0;               // humidity PI output, -100..+100 (split range)
 float tPrev = NAN;             // for derivative on measurement
+float rhPrev = NAN;
+float tSlope = 0, rhSlope = 0; // filtered rate of change per s (integral gating)
 float heaterPct = 0, mistPct = 0, ventPct = 0;
 bool  heaterOn = false, mistOn = false, ventOn = false, circOn = false;
 
 // statistics (valid after the chamber became stable)
 bool     stable = false;
+bool     inBandNow = false;   // last control step was within tolerance
 unsigned long inBandSinceMs = 0;
 unsigned long outBandSinceMs = 0;
 uint32_t statSamples = 0, statInBand = 0;
@@ -315,15 +318,26 @@ void readSensor() {
   }
 }
 
+// Filtered rate of change of a measurement (per second)
+void trackSlope(float pv, float &prev, float &slope, float dt) {
+  if (!isnan(prev)) slope += 0.1f * ((pv - prev) / dt - slope);
+  prev = pv;
+}
+
 // PI with anti-windup + optional D on measurement.
-// The integral only runs when the error is inside +/-izone (no wind-up during
-// large set-point changes) and when it would not push further into saturation.
+// Outside +/-izone the integral pauses while the value is still moving
+// towards the set-point faster than izone per 5 min (a ramp: no wind-up and
+// no overshoot), but runs when the value has stalled short of the set-point
+// (e.g. heater or mist only just big enough). It never integrates further
+// into saturation.
 float piStep(float sp, float pv, float &integ, float kp, float ki, float dTerm,
-             float dt, float lo, float hi, float izone) {
+             float dt, float lo, float hi, float izone, float slope) {
   float e = sp - pv;
   float candidate = clampf(integ + ki * e * dt, lo, hi);
   float out = kp * e + candidate + dTerm;
-  if (fabs(e) <= izone && !((out > hi && e > 0) || (out < lo && e < 0))) integ = candidate;
+  bool ramping = e * slope > 0 && fabs(slope) > izone / 300.0f;
+  if ((fabs(e) <= izone || !ramping) && !((out > hi && e > 0) || (out < lo && e < 0)))
+    integ = candidate;
   return clampf(kp * e + integ + dTerm, lo, hi);
 }
 
@@ -341,11 +355,13 @@ void controlStep() {
   alarms = a;
   alarmsMuted &= alarms;       // forget acknowledgements of cleared alarms
 
+  inBandNow = false;
   if (!cfg.running) {
     heaterPct = mistPct = ventPct = rhOut = 0;
     circOn = false;
     tInt = rhInt = 0;
     tPrev = tMeas;
+    rhPrev = rhMeas;
     return;
   }
 
@@ -353,15 +369,16 @@ void controlStep() {
 
   if (!valid) {                // no sensor -> fail safe
     heaterPct = mistPct = ventPct = 0;
-    tPrev = NAN;
+    tPrev = rhPrev = NAN;
     return;
   }
 
   // ---- temperature loop -> heater
   float dTerm = 0;
   if (!isnan(tPrev)) dTerm = -T_KD * (tMeas - tPrev) / dt;
-  tPrev = tMeas;
-  heaterPct = piStep(cfg.tSet, tMeas, tInt, T_KP, T_KI, dTerm, dt, 0, 100, T_IZONE);
+  trackSlope(tMeas, tPrev, tSlope, dt);
+  trackSlope(rhMeas, rhPrev, rhSlope, dt);
+  heaterPct = piStep(cfg.tSet, tMeas, tInt, T_KP, T_KI, dTerm, dt, 0, 100, T_IZONE, tSlope);
   if (roomMode(cfg.tSet)) { heaterPct = 0; tInt = 0; }
   if (alarms & ALM_OVERTEMP) { heaterPct = 0; tInt = 0; }
 
@@ -369,7 +386,7 @@ void controlStep() {
   //      rhOut > 0 -> mist heads, rhOut < 0 -> fresh-air blower
   float eRH = rhMeas - cfg.rhSet;
   float eT  = roomMode(cfg.tSet) ? 0 : tMeas - cfg.tSet;
-  rhOut = piStep(cfg.rhSet, rhMeas, rhInt, RH_KP, RH_KI, 0, dt, -100, 100, RH_IZONE);
+  rhOut = piStep(cfg.rhSet, rhMeas, rhInt, RH_KP, RH_KI, 0, dt, -100, 100, RH_IZONE, rhSlope);
   mistPct = rhOut > 0 ? rhOut : 0;
   ventPct = rhOut < 0 ? -rhOut : 0;
 
@@ -382,7 +399,7 @@ void controlStep() {
 
   // ---- tolerance statistics
   unsigned long now = millis();
-  bool inBand = fabs(eT) <= T_TOL && fabs(eRH) <= RH_TOL;
+  bool inBand = inBandNow = fabs(eT) <= T_TOL && fabs(eRH) <= RH_TOL;
   if (!stable) {
     if (!inBand) inBandSinceMs = 0;
     else if (inBandSinceMs == 0) inBandSinceMs = now;
@@ -427,8 +444,6 @@ void printNum(Print &p, float v, uint8_t dec) {
 }
 
 void writeRecord(Print &p) {
-  bool inBand = !isnan(tMeas) && (roomMode(cfg.tSet) || fabs(tMeas - cfg.tSet) <= T_TOL) &&
-                fabs(rhMeas - cfg.rhSet) <= RH_TOL;
   printTimestamp(p);            p.print(',');
   printNum(p, tMeas, 1);        p.print(',');
   printNum(p, rhMeas, 1);       p.print(',');
@@ -438,7 +453,7 @@ void writeRecord(Print &p) {
   printNum(p, heaterPct, 0);    p.print(',');
   printNum(p, mistPct, 0);      p.print(',');
   printNum(p, ventPct, 0);      p.print(',');
-  p.print(inBand ? 1 : 0);      p.print(',');
+  p.print(inBandNow ? 1 : 0);   p.print(',');
   p.print(stable ? 1 : 0);      p.print(',');
   p.println(alarms, HEX);
 }
@@ -548,7 +563,7 @@ void drawScreen() {
       if (!stable) {
         unsigned long s = inBandSinceMs ? (millis() - inBandSinceMs) / 1000UL : 0;
         snprintf_P(l0, sizeof(l0), PSTR("Stabilizing..."));
-        snprintf_P(l1, sizeof(l1), PSTR("in band %lus/%lu"), s, (unsigned long)STABLE_SEC);
+        snprintf_P(l1, sizeof(l1), PSTR("in band %lus"), s);
       } else {
         float pct = statSamples ? 100.0f * statInBand / statSamples : 100.0f;
         snprintf_P(l0, sizeof(l0), PSTR("In band %s%%"), fmt(a, pct, 5, 1));

@@ -24,9 +24,12 @@
 #define PIN_MIST          3   // DC-DC SSR input -> 5 V supply of the 4 mist-head drivers
                               // (SSR in the 12 V feed of the 12->5 V step-down, or in the
                               // + line of a separate 5 V supply; a MOSFET also works)
-#define PIN_HEATER        5   // SSR / MOSFET -> heater (outside the salt fog)
+#define PIN_HEATER        5   // SSR -> silicone heater pad on finned Al heat sink (inside
+                              // the chamber; SSR-25DA for 230 VAC, DC/DC SSR for 24 VDC)
 #define PIN_VENT          6   // SSR / MOSFET -> fresh-air blower (outside the salt fog)
-#define PIN_CIRC_FAN      7   // SSR / MOSFET -> circulation fan (optional, IP68)
+#define PIN_CIRC_FAN      7   // SSR / MOSFET -> fan blowing through the heater fins
+                              // (REQUIRED: on whenever the controller is running, so
+                              // the heater never runs without air flow)
 #define PIN_ALARM         8   // active buzzer, or LED of a lighted push button
 #define PIN_SD_CS        10
 // free pins: D4, D9, A0..A3
@@ -81,8 +84,8 @@
 // Shorter ON-times are carried over to the next window, not lost.
 #define HEATER_WINDOW_MS 2000UL   // 2 s = 100 mains half-cycles for a zero-cross SSR
 #define HEATER_MIN_ON_MS   20UL
-// Mist heads are sprayed in short timed bursts (not fast PWM). Short bursts
-// matter: 4 heads in a 40-60 L box add ~1 %RH per 0.5 s of mist.
+// Mist heads are sprayed in short timed bursts (not fast PWM). 4 heads add
+// ~0.25 %RH per 0.5 s of mist in the 200 L chamber (~1 %RH in a 50 L box).
 //   MIST_AC_SIDE_SWITCH 0: fast DC switch - DC-DC SSR or MOSFET in the 12 V / 5 V
 //                          feed of the drivers                  -> 0.3 s bursts
 //   MIST_AC_SIDE_SWITCH 1: SSR on the 230 V input of a USB adapter -> >= 1 s bursts

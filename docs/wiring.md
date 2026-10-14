@@ -7,9 +7,9 @@
 | **A4 / SDA, A5 / SCL** | RGB LCD shield (0x20) + RTC (0x68) | I²C | provided by the stacked shields |
 | **D2** | DHT22 / AM2302 **DATA** | digital in/out | pull-up to 5 V is built into the AM2302. For a bare DHT22, add 10 kΩ (4.7 kΩ for cables > 3 m) |
 | **D3** | **DC/DC SSR input (+)** → supply of the 4 mist-head drivers | digital out | timed bursts, 4 s window, ≥ 0.3 s. SSR input draws ~7–12 mA, which D3 can supply |
-| **D5** | **SSR-25DA → 230 VAC silicone heater pad** | digital out | time-proportioned, 2 s window |
+| **D5** | **heater SSR** → silicone heater pad on the finned heat sink inside the chamber (DC/DC SSR for a 24 VDC pad, SSR-25DA for 230 VAC) | digital out | time-proportioned, 2 s window |
 | **D6** | MOSFET / SSR-DD → **fresh-air blower** | digital out | time-proportioned, 10 s window |
-| **D7** | MOSFET / SSR-DD → circulation fan (optional) | digital out | on while running |
+| **D7** | DC/DC SSR or MOSFET → **heater / circulation fan (IP68)** | digital out | **on whenever RUNning**, so the heater always has air flow |
 | **D8** | active buzzer **or** LED of a lighted push button (5 V) | digital out | blinks on alarm; max 20 mA directly |
 | D10–D13 | microSD (CS, MOSI, MISO, SCK) | SPI | on the Data Logging Shield |
 | VIN | +12 V | power | |
@@ -36,13 +36,17 @@
 ## 3. Power wiring
 
 ```
- 230 VAC L ──[RCD 30 mA]──┬──[fuse]──► SSR-25DA (1) ~ (2) ──[72 °C thermal fuse]── silicone heater pad ── N
-                          │
-                          ├──[2 A fuse]──► 12 V PSU ──┬─► Arduino VIN (barrel jack)
-                          │                           ├─► MOSFET (fresh-air) VIN+ ─ OUT+ ─ blower(+) … blower(−) ─ OUT−
-                          │                           └─► MOSFET (circ. fan)  VIN+ ─ OUT+ ─ fan(+)    … fan(−)    ─ OUT−
-                          │
-                                                      └─► DC/DC SSR (mist) (1)+ ─ (2)− ─► step-down 12→5 V IN+
+ Heater (preferred: 24 VDC pad, SELV):
+ 230 VAC ──[RCD 30 mA]──► 24 V PSU (+) ──[fuse]──► DC/DC SSR (1)+ ─ (2)− ──► KSD301 75 °C ─► thermal fuse 100 °C ─► heater pad (+)
+                                   (−) ─────────────────────────────────────────────────────────────────────────► heater pad (−)
+ Heater (alternative: 230 VAC pad):
+ 230 VAC L ──[RCD 30 mA]──[fuse]──► SSR-25DA (1) ~ (2) ──► KSD301 75 °C ─► thermal fuse 100 °C ─► heater pad ── N
+                                                            heat sink ── protective earth (PE)
+
+ 230 VAC ──[RCD 30 mA]──[2 A fuse]──► 12 V PSU ──┬─► Arduino VIN (barrel jack)
+                                                 ├─► MOSFET / SSR (fresh-air, D6) ─ blower
+                                                 ├─► MOSFET / SSR (heater fan, D7) ─ IP68 fan
+                                                 └─► DC/DC SSR (mist) (1)+ ─ (2)− ─► step-down 12→5 V IN+
                                                                                           OUT+ 5 V ─┬─ driver #1 +
                                                                                                     ├─ driver #2 +
                                                                                                     ├─ driver #3 +
@@ -62,31 +66,36 @@
   * Both placements use the default `MIST_AC_SIDE_SWITCH 0`. Set `1` only if you switch the **230 V** input of a USB adapter instead (≥ 1 s bursts).
 * **Mechanical relays:** not suitable for the heater or mist heads. They switch every few seconds, which is about 20,000 cycles per day.
 * Fit a 1N5819 flyback diode (cathode to +) across each fan when it is switched by a MOSFET.
-* Mount the SSR on a heat sink if the heater draws more than about 5 A.
-* Mains wiring must be done by a qualified electrician. Earth any metal parts, including the aluminium heater wall.
+* **Heater safety (the heater is inside the salt fog):**
+  * Prefer a **24 VDC** pad: a failing insulation in wet salt then cannot give a mains shock.
+  * Fit the **KSD301 75 °C** bimetal (auto-reset) and a **~100 °C thermal fuse** on the heat sink, in series with the pad. They cut the heater if the fan stops, which the software cannot detect.
+  * Use one continuous silicone lead from the pad out through a cable gland, with no joints inside the chamber, and a waterproof connector outside.
+  * With a 230 V pad: earth the heat sink, and use an RCD/RCBO 30 mA.
+* Mount the heater SSR on a heat sink (a 300 W / 24 V pad draws 12.5 A).
+* Mains wiring must be done by a qualified electrician.
 
-## 4. Physical layout (salt fog)
+## 4. Physical layout (chamber 50 × 80 × 50 cm, 200 L, plastic)
 
 ```
-                     sloped lid (drips run to the walls, not onto specimens)
-          ┌─────────────────────────────────────────────────────────┐
- room air │                                                         │
- ──►[fresh-air blower]──►[flap]──►       DHT22 (filter cap)         │
-   (outside, D6)          │       behind baffle, mid-height         │
-          │                                                         │
-          │      SCC specimens on PP rack        [IP68 circ. fan]   │
-          │                                     (optional, D7)      │
-          │   ~~~ 4 ultrasonic mist heads in 3.5 % NaCl tank ~~~    │
-          │═════════════════ thin Al wall, epoxy coated ════════════│──► passive outlet
-          └─────────────────────────────────────────────────────────┘    to water trap
-            ▓▓▓▓▓▓▓▓ silicone heater pad (outside, D5 via SSR) ▓▓▓▓▓
-            ░░░░░░░░░░░░░░░░░░░ insulation ░░░░░░░░░░░░░░░░░░░░░░░░
+                         sloped lid (drips run to the walls, not onto specimens)
+       ┌──────────────────────────────── 80 cm ──────────────────────────────────┐
+ room  │  drip shield                                                            │
+ air ─►│[flap]◄─[fresh-air blower,     ┌────────┐           DHT22 (filter cap)  │
+       │         outside, D6]          │ heater │           behind baffle,      │
+       │                               │ module │           mid-height          │
+       │   heater module ─────────────►│ fan ►►►│►► air                         │ 50 cm
+       │   (pad + coated Al fins +     │ fins   │                               │ high
+       │    IP68 fan, D5 + D7,         └────────┘   SCC specimens on PP rack    │
+       │    on standoffs ≥ 5 cm,                                                │
+       │    corner away from the mist)        ~~~ 4 mist heads in 3.5 % NaCl ~~~│──► passive outlet
+       └────────────────────────────────────────────────────────────────────────┘    to water trap
+         20 mm insulation outside (recommended)
 
-   IP65 control box (outside): UNO + shields, MOSFETs, SSR, PSUs
+   IP65 control box (outside): UNO + shields, SSRs, MOSFETs, PSUs, heater/fan connectors
 ```
 
 ## 5. DHT22 placement
 
-* Mount it mid-height in the chamber, **out of the direct mist plume**, behind a mesh or baffle, and not near the heated wall.
+* Mount it mid-height in the chamber, **out of the direct mist plume** and **out of the hot air stream from the heater module**, behind a mesh or baffle.
 * Use the filter cap, and conformal-coat the solder joints and lead entry.
 * Check it against a reference every few weeks. Salt deposits and long periods near 100 %RH make it drift.

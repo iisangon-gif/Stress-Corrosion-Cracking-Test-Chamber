@@ -26,20 +26,20 @@ while read -r name vars; do
     env $vars $bin || fail=1
   fi
 done <<'SCENARIOS'
-nominal_4_heads_50L              TA=25 RA=0.6
+nominal_200L_insulated           TA=25 RA=0.6
+uninsulated_300W                 UA=6.6 PW=300
+uninsulated_200W                 UA=6.6
+heavy_contents                   CAP=15000
+light_contents                   CAP=3000
+weak_heater_fan                  GW=4
+poor_mixing_slow_sensor          TAU=30
+strong_mist                      HR=0.35
+weak_mist                        HR=0.1
 room_temperature_mode            T1=ROOM H1=75 T2=ROOM H2=40 TA=25 RA=0.3
 low_limit_20C                    T1=20 H1=80 T2=20 H2=50 TA=17 RA=0.5
 low_rh_20pct_dry_room            T1=30 H1=50 T2=40 H2=20 TA=25 RA=0.35
-humid_thai_room                  T1=35 H1=75 T2=40 H2=60 TA=30 RA=0.7
-weak_mist_big_box                HR=0.3 TAU=5
-very_strong_mist_slow_sensor     HR=1.2 TAU=30
-strong_mist_room_temperature     T1=ROOM H1=80 T2=ROOM H2=30 HR=1.2 TAU=15 RA=0.25
-low_thermal_mass                 CAP=1000 UA=1.5
-tiny_box                         CAP=500 CW=400 HR=1.2 TAU=25 UA=2
-large_thermal_mass               CAP=6000 CW=1500 PW=150
-small_heater                     PW=50
-ac_side_mist_moderate                HR=0.5
-info:ac_side_mist_strong             T1=ROOM H1=75 T2=ROOM H2=40 HR=1.0 TAU=15 RA=0.3
-info:thick_wall_slow_heater      CW=2000 GW=2
+humid_thai_room_80pct            T1=35 H1=75 T2=40 H2=80 TA=30 RA=0.7
+small_heater_100W                PW=100
+ac_side_mist                     HR=0.19
 SCENARIOS
 exit $fail

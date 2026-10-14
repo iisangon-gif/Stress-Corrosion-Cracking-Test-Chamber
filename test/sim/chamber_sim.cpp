@@ -7,16 +7,19 @@
 // Checked windows: 1.5-4 h, 5.5-6 h, 6 h 15 min - 8 h  ->  +/-1 C, +/-2 %RH
 // (T1/T2 may be "ROOM": no heating, temperature not checked)
 //
-// The heater is a pad on the OUTSIDE of the chamber wall (kept out of the
-// salt fog), so heat reaches the air through a wall node:
-//   heater -> wall (CW, J/K) -> air (CAP, J/K) -> room
+// Default chamber: 50 x 80 x 50 cm plastic box (200 L) with 20 mm insulation.
+// The heater is a silicone pad on a finned aluminium heat sink with a fan,
+// inside the chamber, so heat reaches the air through the heat-sink node:
+//   heater -> heat sink (CW, J/K) -fan-> air + contents (CAP, J/K) -> room
+// Evaporating mist takes latent heat (2450 J/g) from the air.
 //
 // Plant parameters can be overridden with environment variables:
-//   CAP  air + contents heat capacity J/K (3000)  UA  air loss to room W/K (0.8)
-//   CW   heated wall heat capacity J/K    (800)   GW  wall -> air W/K       (4)
-//   PW   heater power W                   (100)   HR  4 mist heads g/m3/s  (0.7)
-//   TAU  sensor lag s                     (10)    TA  room temperature C    (25)
-//   RA   room RH fraction                 (0.6)   MD  mist start delay s     (0.3)
+//   CAP  air + walls + contents J/K       (6000)  UA  chamber loss W/K      (2.3)
+//   CW   heat sink + pad J/K              (450)   GW  heat sink -> air W/K  (10)
+//   UAW  heat sink -> room W/K            (0)     V   chamber volume m3     (0.2)
+//   PW   heater power W                   (200)   HR  4 mist heads g/m3/s   (0.19)
+//   TAU  sensor lag s                     (15)    TA  room temperature C    (25)
+//   RA   room RH fraction                 (0.6)   MD  mist start delay s    (0.3)
 //   T1 H1 / T2 H2  set-points             (35 / 70, 40 / 40)
 //   CSV  write the firmware's serial CSV output to this file
 //
@@ -44,11 +47,12 @@ static double ahSat(double T) {
 }
 
 int main() {
-  const double C = env("CAP", 3000), UA = env("UA", 0.8), Pmax = env("PW", 100);
-  const double Cw = env("CW", 800), Gw = env("GW", 4), UAw = 0.3;  // wall node
-  const double humRate = env("HR", 0.7), tau = env("TAU", 10);
+  const double C = env("CAP", 6000), UA = env("UA", 2.3), Pmax = env("PW", 200);
+  const double Cw = env("CW", 450), Gw = env("GW", 10), UAw = env("UAW", 0);  // heat sink
+  const double humRate = env("HR", 0.19), tau = env("TAU", 15), V = env("V", 0.2);
   const double Tamb = env("TA", 25), AHamb = env("RA", 0.6) * ahSat(Tamb);
-  const double UAvent = 3.0, kLeak = 0.002, kVent = 0.02;   // fan venting / leakage
+  const double kLeak = 0.002, kVent = 0.02;   // air exchange 1/s: leakage / blower
+  const double UAvent = kVent * V * 1.2 * 1005;  // sensible heat carried out by the blower
   const double dt = 0.1, hours = 8, mistDelay = env("MD", 0.3);
   const char *T1 = getenv("T1") ? getenv("T1") : "35", *T2 = getenv("T2") ? getenv("T2") : "40";
   const double H1 = env("H1", 70), H2 = env("H2", 40);
@@ -83,8 +87,9 @@ int main() {
 
     double ua = UA + vent * UAvent + (lid ? 20 : 0);
     double qWall = Gw * (Tw - T);
+    double pEvap = hum ? humRate * V * 2450 : 0;   // latent heat of the evaporating mist
     Tw += dt * (P - qWall - UAw * (Tw - Tamb)) / Cw;
-    T += dt * (qWall - ua * (T - Tamb)) / C;
+    T += dt * (qWall - pEvap - ua * (T - Tamb)) / C;
     double k = kLeak + vent * kVent + (lid ? 0.05 : 0);
     AH += dt * ((hum ? humRate : 0) - k * (AH - AHamb));
     if (AH > ahSat(T)) AH = ahSat(T);
